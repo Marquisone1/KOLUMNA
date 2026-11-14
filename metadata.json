@@ -1,0 +1,5 @@
+{
+  "name": "Kolumna",
+  "description": "Online card game for 2 to 6 players with the same rules as the classic twelve-card game: flip, swap, clear columns, lowest score wins. German and English.",
+  "requestFramePermissions": []
+}
