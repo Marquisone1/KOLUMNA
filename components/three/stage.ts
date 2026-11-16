@@ -1,19 +1,26 @@
 import * as THREE from 'three';
 import type { GameState } from '../../game/types';
 import { SEAT_COLORS } from '../PlayerBoard';
-import { backTexture, CARD_H, CARD_W, frontTexture } from './textures';
+import { backTexture, CARD_H, CARD_W, frontTexture, leatherTexture, woodTexture } from './textures';
 import { CARD_T, GRID_D, GRID_W, opponentHandPose, slotPose, type Layout, type Pose } from './layout';
 
 // The card scene. Every card on the table is one object keyed by its id.
 // `sync` derives where each card belongs from the game state; a card whose place changed
 // flies there (arc, flip, turn) instead of jumping. Event-specific moves that must happen
 // before a state commit (gather for a deal, lift a cleared column) go through `flyTo`.
+//
+// Deck and discard pile sit on a turntable in the middle of the table that turns to face
+// whoever's turn it is. Cards resting on the pile ride along with it.
 
 const ACCENT = new THREE.Color('#e3a34a');
 const WHITE = new THREE.Color('#efe9de');
 const DISCARD_SHOWN = 6;
+/** Height of the turntable's top above the felt */
+export const TT_H = 0.17;
+const TT_R = 1.5;
 const EASE = (t: number) => 1 - Math.pow(1 - t, 3);
 const EASE_IO = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const CARD_THICK = 0.0062;
 
 function roundedRectShape(w: number, h: number, r: number, cx = 0, cy = 0) {
   const s = new THREE.Shape();
@@ -33,7 +40,7 @@ function roundedRectShape(w: number, h: number, r: number, cx = 0, cy = 0) {
 
 /** A flat rounded rectangle lying in the XZ plane, facing +Y, UVs 0..1 over the card */
 function cardGeometry() {
-  const g = new THREE.ShapeGeometry(roundedRectShape(CARD_W, CARD_H, CARD_W * 0.11), 4);
+  const g = new THREE.ShapeGeometry(roundedRectShape(CARD_W, CARD_H, CARD_W * 0.075), 5);
   const pos = g.attributes.position;
   const uv = g.attributes.uv;
   for (let i = 0; i < pos.count; i++) uv.setXY(i, pos.getX(i) / CARD_W + 0.5, pos.getY(i) / CARD_H + 0.5);
@@ -41,29 +48,50 @@ function cardGeometry() {
   return g;
 }
 
+/** The card's paper edge: only the sides of an extruded outline */
+function edgeGeometry() {
+  const g = new THREE.ExtrudeGeometry(roundedRectShape(CARD_W, CARD_H, CARD_W * 0.075), { depth: CARD_THICK, bevelEnabled: false, curveSegments: 5 });
+  g.rotateX(-Math.PI / 2);
+  g.translate(0, -CARD_THICK / 2, 0);
+  return g;
+}
+
 function ringGeometry(w: number, h: number, r: number, t: number) {
   const outer = roundedRectShape(w + t * 2, h + t * 2, r + t);
   outer.holes.push(roundedRectShape(w, h, r) as unknown as THREE.Path);
-  const g = new THREE.ShapeGeometry(outer, 4);
+  const g = new THREE.ShapeGeometry(outer, 5);
   g.rotateX(-Math.PI / 2);
   return g;
 }
 
 const geo = {
   card: null as THREE.BufferGeometry | null,
+  edge: null as THREE.BufferGeometry | null,
   ring: null as THREE.BufferGeometry | null,
 };
 
-const materials = new Map<string, THREE.MeshStandardMaterial>();
+const materials = new Map<string, THREE.Material>();
 function faceMaterial(v: number | null): THREE.MeshStandardMaterial {
   const key = v === null ? 'back' : 'f' + v;
-  let m = materials.get(key);
+  let m = materials.get(key) as THREE.MeshStandardMaterial | undefined;
   if (!m) {
-    m = new THREE.MeshStandardMaterial({ map: v === null ? backTexture() : frontTexture(v), roughness: 0.62, metalness: 0 });
+    // satin card stock: a soft sheen from the room, no plastic shine
+    m = new THREE.MeshStandardMaterial({ map: v === null ? backTexture() : frontTexture(v), roughness: 0.48, metalness: 0, envMapIntensity: 0.6 });
     m.shadowSide = THREE.DoubleSide;
     materials.set(key, m);
   }
   return m;
+}
+function edgeMaterials(): THREE.Material[] {
+  let hidden = materials.get('edge-hidden');
+  let side = materials.get('edge');
+  if (!hidden || !side) {
+    hidden = new THREE.MeshBasicMaterial({ visible: false });
+    side = new THREE.MeshStandardMaterial({ color: '#efe6d6', roughness: 0.8 });
+    materials.set('edge-hidden', hidden);
+    materials.set('edge', side);
+  }
+  return [hidden, side];
 }
 
 const noRaycast = () => {};
@@ -74,12 +102,15 @@ class CardObj {
   group = new THREE.Group();
   front: THREE.Mesh;
   back: THREE.Mesh;
+  edge: THREE.Mesh;
   ring: THREE.Mesh;
   ringMat: THREE.MeshBasicMaterial;
   v: number | null = null;
   pose: Pose;
   target: Pose;
   tween: Tween | null = null;
+  /** index on the discard pile while the card rests there, else −1 */
+  pile = -1;
   lift = 0;
   liftGoal = 0;
   ringOpacity = 0;
@@ -87,11 +118,13 @@ class CardObj {
 
   constructor(public id: number, pose: Pose) {
     this.front = new THREE.Mesh(geo.card!, faceMaterial(null));
-    this.front.position.y = 0.0012;
+    this.front.position.y = CARD_THICK / 2 + 0.0003;
     this.front.castShadow = true;
     this.back = new THREE.Mesh(geo.card!, faceMaterial(null));
     this.back.rotation.z = Math.PI;
-    this.back.position.y = -0.0012;
+    this.back.position.y = -CARD_THICK / 2 - 0.0003;
+    this.edge = new THREE.Mesh(geo.edge!, edgeMaterials());
+    this.edge.raycast = noRaycast;
     this.ringMat = new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
     this.ring = new THREE.Mesh(geo.ring!, this.ringMat);
     this.ring.raycast = noRaycast;
@@ -99,7 +132,7 @@ class CardObj {
     this.ring.renderOrder = 1;
     this.front.userData.cardId = id;
     this.back.userData.cardId = id;
-    this.group.add(this.front, this.back, this.ring);
+    this.group.add(this.front, this.back, this.edge, this.ring);
     this.pose = { ...pose };
     this.target = { ...pose };
     this.apply();
@@ -120,15 +153,15 @@ class CardObj {
 }
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+function wrapAngle(d: number) {
+  return Math.atan2(Math.sin(d), Math.cos(d));
+}
 function lerpAngle(a: number, b: number, t: number) {
-  let d = (b - a) % (Math.PI * 2);
-  if (d > Math.PI) d -= Math.PI * 2;
-  if (d < -Math.PI) d += Math.PI * 2;
-  return a + d * t;
+  return a + wrapAngle(b - a) * t;
 }
 const samePose = (a: Pose, b: Pose) =>
   Math.abs(a.x - b.x) < 1e-3 && Math.abs(a.y - b.y) < 1e-3 && Math.abs(a.z - b.z) < 1e-3 &&
-  Math.abs(a.yaw - b.yaw) < 1e-3 && Math.abs(a.tilt - b.tilt) < 1e-3 && Math.abs(a.flip - b.flip) < 1e-3 && Math.abs(a.s - b.s) < 1e-3;
+  Math.abs(wrapAngle(a.yaw - b.yaw)) < 1e-3 && Math.abs(a.tilt - b.tilt) < 1e-3 && Math.abs(a.flip - b.flip) < 1e-3 && Math.abs(a.s - b.s) < 1e-3;
 
 function hash(id: number) {
   let x = (id + 1) * 2654435761;
@@ -150,6 +183,13 @@ export class TableStage {
   root = new THREE.Group();
   cards = new Map<number, CardObj>();
   private pool: CardObj[] = [];
+  private turntable = new THREE.Group();
+  /** current and goal turn of the turntable; it turns on the wall clock so slow frames do not slow the game */
+  private ttAngle = 0;
+  private ttGoal = 0;
+  private ttFrom = 0;
+  private ttT0 = 0;
+  private ttDur = 0;
   private deckMesh: THREE.Mesh;
   private deckHeight = 0;
   private deckGoal = 0;
@@ -169,11 +209,15 @@ export class TableStage {
   tossActive = false;
   pileHover: 'deck' | 'discard' | 'toss' | null = null;
   private toss = new THREE.Group();
-  private tossCap: THREE.Mesh;
-  private tossY = -0.7;
+  private tossMoving = new THREE.Group();
+  private tossLabelMesh: THREE.Mesh;
+  private tossY = -0.06;
   private tossV = 0;
   private tossPress = -1;
   private tossLabel = '';
+  private tossLacquer: THREE.MeshStandardMaterial | null = null;
+  private static readonly CAP_OFF = new THREE.Color('#5c2219');
+  private static readonly CAP_ON = new THREE.Color('#a8341f');
   reduced = false;
   invalidate: () => void = () => {};
   private waiters: (() => void)[] = [];
@@ -183,6 +227,10 @@ export class TableStage {
   private discardIds: number[] = [];
   /** Options for the next sync, set by the animator right before a commit */
   nextSync: SyncOptions | null = null;
+  camera: THREE.Camera | null = null;
+  canvas: HTMLElement | null = null;
+  /** The last state shown, for tests and debugging */
+  view: GameState | null = null;
 
   takeNextSync(): SyncOptions {
     const o = this.nextSync ?? {};
@@ -192,11 +240,15 @@ export class TableStage {
 
   constructor() {
     if (!geo.card) geo.card = cardGeometry();
-    if (!geo.ring) geo.ring = ringGeometry(CARD_W, CARD_H, CARD_W * 0.11, 0.016);
+    if (!geo.edge) geo.edge = edgeGeometry();
+    if (!geo.ring) geo.ring = ringGeometry(CARD_W, CARD_H, CARD_W * 0.075, 0.016);
+
+    this.buildTurntable();
+
     // the deck: a block of card stock with a card back on top
-    const edge = new THREE.MeshStandardMaterial({ color: '#d8cdb8', roughness: 0.9 });
-    const top = new THREE.MeshStandardMaterial({ map: backTexture(), roughness: 0.62 });
-    const box = new THREE.BoxGeometry(CARD_W * 0.985, 1, CARD_H * 0.985);
+    const edge = new THREE.MeshStandardMaterial({ color: '#e6dccb', roughness: 0.85 });
+    const top = new THREE.MeshStandardMaterial({ map: backTexture(), roughness: 0.48 });
+    const box = new THREE.BoxGeometry(CARD_W * 0.99, 1, CARD_H * 0.99);
     box.translate(0, 0.5, 0);
     this.deckMesh = new THREE.Mesh(box, [edge, edge, top, edge, edge, edge]);
     this.deckMesh.castShadow = true;
@@ -205,43 +257,89 @@ export class TableStage {
     this.deckMesh.scale.y = 0.0001;
     this.deckRing = new THREE.Mesh(geo.ring, new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0, depthWrite: false }));
     this.deckRing.raycast = noRaycast;
-    // an outline printed on the felt where the discard pile goes
-    const markMat = new THREE.MeshBasicMaterial({ color: '#efe9de', transparent: true, opacity: 0.14, depthWrite: false });
-    this.discardMark = new THREE.Mesh(ringGeometry(CARD_W, CARD_H, CARD_W * 0.11, 0.012), markMat);
+    // an outline tooled into the leather where the discard pile goes
+    const markMat = new THREE.MeshBasicMaterial({ color: '#e8c27a', transparent: true, opacity: 0.22, depthWrite: false });
+    this.discardMark = new THREE.Mesh(ringGeometry(CARD_W, CARD_H, CARD_W * 0.075, 0.012), markMat);
     this.discardMark.raycast = noRaycast;
     // invisible pick target that covers the whole discard pile, so a click lands even between cards
-    const hit = new THREE.Mesh(new THREE.PlaneGeometry(CARD_W * 1.15, CARD_H * 1.15).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ visible: false }));
+    const hit = new THREE.Mesh(new THREE.PlaneGeometry(CARD_W * 1.2, CARD_H * 1.2).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ visible: false }));
     hit.userData.anchor = 'discard';
+    hit.position.y = 0.01;
     this.discardMark.add(hit);
-    hit.raycast = THREE.Mesh.prototype.raycast;
     this.discardRing = new THREE.Mesh(geo.ring, new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0, depthWrite: false }));
     this.discardRing.raycast = noRaycast;
-    // The discard button: a wooden plinth with a printed cap, sunk into the table until it is needed
-    const plinthMat = new THREE.MeshStandardMaterial({ color: '#5a3a26', roughness: 0.5 });
-    const plinth = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.56, 0.8, 32), plinthMat);
-    plinth.position.y = -0.4;
-    plinth.castShadow = true;
-    this.tossCap = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.1, 32), [
-      new THREE.MeshStandardMaterial({ color: '#e3a34a', roughness: 0.45 }),
-      new THREE.MeshStandardMaterial({ color: '#e3a34a', roughness: 0.45 }),
-      new THREE.MeshStandardMaterial({ color: '#e3a34a', roughness: 0.45 }),
-    ]);
-    this.tossCap.position.y = 0.05;
-    this.tossCap.castShadow = true;
-    plinth.userData.anchor = 'toss';
-    this.tossCap.userData.anchor = 'toss';
-    this.toss.add(plinth, this.tossCap);
-    this.toss.position.y = this.tossY;
-    // the slot it comes out of
-    const slot = new THREE.Mesh(new THREE.RingGeometry(0.56, 0.6, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#0c0f0d', transparent: true, opacity: 0.35, depthWrite: false }));
-    slot.position.y = 0.002;
-    slot.raycast = noRaycast;
-    slot.visible = false;
-    this.tossSlot = slot;
-    this.root.add(this.matGroup, this.deckMesh, this.deckRing, this.discardMark, this.discardRing, this.toss, slot);
+    this.turntable.add(this.deckMesh, this.deckRing, this.discardMark, this.discardRing);
+
+    this.tossLabelMesh = this.buildButton();
+    this.root.add(this.matGroup, this.turntable, this.toss);
   }
 
-  private tossSlot: THREE.Mesh;
+  /** A walnut lazy susan with a leather top and a brass rim, on a dark bearing */
+  private buildTurntable() {
+    const wood = woodTexture('#5b3923', 90);
+    const woodMat = new THREE.MeshStandardMaterial({ map: wood, roughness: 0.42, metalness: 0, envMapIntensity: 0.8 });
+    const profile = [
+      new THREE.Vector2(0, 0.06), new THREE.Vector2(TT_R - 0.05, 0.06), new THREE.Vector2(TT_R, 0.085),
+      new THREE.Vector2(TT_R + 0.015, 0.12), new THREE.Vector2(TT_R, 0.155), new THREE.Vector2(TT_R - 0.04, TT_H - 0.002),
+      new THREE.Vector2(0, TT_H - 0.002),
+    ];
+    const disc = new THREE.Mesh(new THREE.LatheGeometry(profile, 96), woodMat);
+    disc.castShadow = true;
+    disc.receiveShadow = true;
+    const bearing = new THREE.Mesh(new THREE.CylinderGeometry(TT_R * 0.7, TT_R * 0.75, 0.06, 48), new THREE.MeshStandardMaterial({ color: '#1b1612', roughness: 0.5, metalness: 0.4 }));
+    bearing.position.y = 0.03;
+    const leather = leatherTexture('#22140f');
+    leather.repeat.set(3, 3);
+    const top = new THREE.Mesh(new THREE.CircleGeometry(TT_R - 0.16, 72).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: leather, roughness: 0.62, envMapIntensity: 0.5 }));
+    top.position.y = TT_H - 0.0005;
+    top.receiveShadow = true;
+    const brass = new THREE.MeshStandardMaterial({ color: '#c9a063', roughness: 0.3, metalness: 1, envMapIntensity: 1.1 });
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(TT_R - 0.15, 0.018, 8, 96).rotateX(Math.PI / 2), brass);
+    rim.position.y = TT_H;
+    // a small brass pointer on the edge shows whom the piles face
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.16, 3).rotateX(Math.PI / 2), brass);
+    tip.position.set(0, TT_H - 0.01, TT_R - 0.07);
+    tip.scale.y = 0.3;
+    for (const m of [disc, bearing, top, rim, tip]) m.raycast = noRaycast;
+    this.turntable.add(bearing, disc, top, rim, tip);
+  }
+
+  /**
+   * The discard button: a brass bezel set into the table, and a lacquered cap on a stem
+   * that sits flush with the felt and rises when you may discard.
+   */
+  private buildButton(): THREE.Mesh {
+    const brass = new THREE.MeshStandardMaterial({ color: '#c9a063', roughness: 0.28, metalness: 1, envMapIntensity: 1.1 });
+    const bezel = new THREE.Mesh(new THREE.LatheGeometry([
+      new THREE.Vector2(0.5, -0.02), new THREE.Vector2(0.5, 0.025), new THREE.Vector2(0.56, 0.04),
+      new THREE.Vector2(0.64, 0.025), new THREE.Vector2(0.66, 0.0), new THREE.Vector2(0.66, -0.02),
+    ], 64), brass);
+    bezel.castShadow = true;
+    bezel.receiveShadow = true;
+    const well = new THREE.Mesh(new THREE.CircleGeometry(0.5, 48).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#0e0b09', roughness: 0.9 }));
+    well.position.y = -0.3;
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.38, 0.6, 40), brass);
+    stem.position.y = -0.3;
+    // satin red enamel: a little sheen, but no mirror that would wash out the label
+    const lacquer = new THREE.MeshStandardMaterial({ color: '#5c2219', roughness: 0.42, metalness: 0, envMapIntensity: 0.35 });
+    this.tossLacquer = lacquer;
+    // lathe profile from the bottom edge up to the centre, so the faces point outward
+    const cap = new THREE.Mesh(new THREE.LatheGeometry([
+      new THREE.Vector2(0.47, 0.0), new THREE.Vector2(0.48, 0.05), new THREE.Vector2(0.46, 0.11),
+      new THREE.Vector2(0.4, 0.15), new THREE.Vector2(0.3, 0.165), new THREE.Vector2(0, 0.17),
+    ], 64), lacquer);
+    cap.castShadow = true;
+    const label = new THREE.Mesh(new THREE.CircleGeometry(0.34, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false }));
+    label.position.y = 0.176;
+    label.raycast = noRaycast;
+    for (const m of [stem, cap]) m.userData.anchor = 'toss';
+    bezel.raycast = noRaycast;
+    well.raycast = noRaycast;
+    this.tossMoving.add(stem, cap, label);
+    this.tossMoving.position.y = this.tossY;
+    this.toss.add(well, bezel, this.tossMoving);
+    return label;
+  }
 
   /** Print the button's label on its cap (language changes redraw it) */
   setTossLabel(text: string) {
@@ -250,32 +348,27 @@ export class TableStage {
     const c = document.createElement('canvas');
     c.width = c.height = 256;
     const ctx = c.getContext('2d')!;
-    ctx.fillStyle = '#e3a34a';
-    ctx.fillRect(0, 0, 256, 256);
-    ctx.strokeStyle = 'rgba(43,32,20,0.35)';
-    ctx.lineWidth = 4;
+    ctx.clearRect(0, 0, 256, 256);
+    ctx.strokeStyle = 'rgba(244,228,200,0.7)';
+    ctx.lineWidth = 5;
     ctx.beginPath();
-    ctx.arc(128, 128, 112, 0, Math.PI * 2);
+    ctx.arc(128, 128, 116, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.fillStyle = '#2b2014';
+    ctx.fillStyle = '#f7ead2';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    let size = 46;
-    ctx.font = `600 ${size}px 'Instrument Sans', system-ui, sans-serif`;
-    while (ctx.measureText(text).width > 200 && size > 20) {
-      size -= 2;
-      ctx.font = `600 ${size}px 'Instrument Sans', system-ui, sans-serif`;
-    }
+    let size = 58;
+    const font = (s: number) => `700 ${s}px 'Instrument Sans', system-ui, sans-serif`;
+    ctx.font = font(size);
+    while (ctx.measureText(text).width > 196 && size > 20) ctx.font = font((size -= 2));
     ctx.fillText(text, 128, 132);
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
-    // the cylinder cap maps the canvas sideways; turn it to read from your seat
-    tex.center.set(0.5, 0.5);
-    tex.rotation = Math.PI / 2;
-    const mats = this.tossCap.material as THREE.MeshStandardMaterial[];
-    mats[1].map?.dispose();
-    mats[1] = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.45 });
-    this.tossCap.material = mats;
+    const m = this.tossLabelMesh.material as THREE.MeshBasicMaterial;
+    m.map?.dispose();
+    m.map = tex;
+    m.color.set('#ffffff');
+    m.needsUpdate = true;
     this.invalidate();
   }
 
@@ -289,14 +382,12 @@ export class TableStage {
 
   setLayout(layout: Layout, players: GameState['players']) {
     this.layout = layout;
-    this.deckMesh.position.set(layout.deck.x, 0, layout.deck.z);
-    this.deckRing.position.set(layout.deck.x, 0.0015, layout.deck.z);
-    this.discardMark.position.set(layout.discard.x, 0.0008, layout.discard.z);
-    this.discardRing.position.set(layout.discard.x, 0.0015, layout.discard.z);
-    this.toss.position.x = layout.toss.x;
-    this.toss.position.z = layout.toss.z;
-    this.tossSlot.position.set(layout.toss.x, 0.002, layout.toss.z);
-    // a mat for every seat: slightly lighter felt with a printed rule in the seat colour
+    this.deckMesh.position.set(layout.deck.x, TT_H, layout.deck.z);
+    this.deckRing.position.set(layout.deck.x, TT_H + 0.0015, layout.deck.z);
+    this.discardMark.position.set(layout.discard.x, TT_H + 0.0008, layout.discard.z);
+    this.discardRing.position.set(layout.discard.x, TT_H + 0.0015, layout.discard.z);
+    this.toss.position.set(layout.toss.x, 0, layout.toss.z);
+    // a mat for every seat: a printed rule in the seat colour around the grid
     this.matGroup.clear();
     this.mats.clear();
     players.forEach((p, i) => {
@@ -316,69 +407,85 @@ export class TableStage {
   }
 
   setTurn(view: GameState) {
-    const cur = view.phase === 'play' ? view.players[view.turn]?.id : null;
+    const curIdx = view.phase === 'play' ? view.turn : -1;
+    const cur = curIdx >= 0 ? view.players[curIdx]?.id : null;
     this.mats.forEach((m, id) => { m.goal = id === cur ? 0.85 : 0.2; });
+    // the turntable faces whoever plays; outside play it faces you
+    const seat = curIdx >= 0 ? this.layout?.seats[curIdx] : null;
+    const goal = seat ? seat.yaw : 0;
+    const next = this.ttAngle + wrapAngle(goal - this.ttAngle);
+    if (Math.abs(next - this.ttGoal) > 1e-4) {
+      this.ttGoal = next;
+      this.ttFrom = this.ttAngle;
+      this.ttT0 = performance.now();
+      this.ttDur = this.reduced ? 0 : 420 + Math.abs(next - this.ttAngle) * 220;
+    }
     this.invalidate();
   }
 
   // ---------- poses ----------
 
-  deckTop(): Pose {
-    const L = this.layout!;
-    return { x: L.deck.x, y: this.deckHeight + CARD_T, z: L.deck.z, yaw: 0, tilt: 0, flip: Math.PI, s: 1 };
+  worldOnTurntable(lx: number, lz: number) {
+    return this.onTurntable(lx, lz);
   }
 
-  discardPose(i: number, id: number): Pose {
+  /** A point on the turntable (in its own frame) at the table's current turn, in world space */
+  private onTurntable(lx: number, lz: number, angle = this.ttAngle) {
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    return { x: c * lx + s * lz, z: -s * lx + c * lz };
+  }
+
+  deckTop(): Pose {
+    const L = this.layout!;
+    const p = this.onTurntable(L.deck.x, L.deck.z);
+    return { x: p.x, y: TT_H + this.deckHeight + CARD_T, z: p.z, yaw: this.ttAngle, tilt: 0, flip: Math.PI, s: 1 };
+  }
+
+  discardPose(i: number, id: number, angle = this.ttAngle): Pose {
     const L = this.layout!;
     const j = hash(id);
-    return {
-      x: L.discard.x + (j - 0.5) * 0.05,
-      y: CARD_T * (i + 1),
-      z: L.discard.z + (hash(id + 7) - 0.5) * 0.05,
-      yaw: (j - 0.5) * 0.22,
-      tilt: 0,
-      flip: 0,
-      s: 1,
-    };
+    const p = this.onTurntable(L.discard.x + (j - 0.5) * 0.05, L.discard.z + (hash(id + 7) - 0.5) * 0.05, angle);
+    return { x: p.x, y: TT_H + CARD_T * (i + 1), z: p.z, yaw: angle + (j - 0.5) * 0.22, tilt: 0, flip: 0, s: 1 };
   }
 
   /** Where every card shown on the table belongs in this state */
   homes(view: GameState, me: string) {
     const L = this.layout!;
-    const out = new Map<number, { pose: Pose; v: number | null; order: number }>();
+    const out = new Map<number, { pose: Pose; v: number | null; order: number; pile: number }>();
     this.slots.clear();
-    let order = 0;
     view.players.forEach((p, pi) => {
       const seat = L.seats[pi];
       if (!seat) return;
       const cols = p.grid.length;
       p.grid.forEach((col, c) => col.forEach((slot, r) => {
-        out.set(slot.card.id, { pose: slotPose(seat, cols, c, r, slot.up), v: slot.card.v, order: (r * 4 + c) * view.players.length + pi });
+        out.set(slot.card.id, { pose: slotPose(seat, cols, c, r, slot.up), v: slot.card.v, order: (r * 4 + c) * view.players.length + pi, pile: -1 });
         if (p.id === me) this.slots.set(slot.card.id, { owner: p.id, c, r, cols });
       }));
-      order++;
     });
     const shown = view.discard.slice(-DISCARD_SHOWN);
-    shown.forEach((card, i) => out.set(card.id, { pose: this.discardPose(i, card.id), v: card.v, order: 1000 + i }));
+    shown.forEach((card, i) => out.set(card.id, { pose: this.discardPose(i, card.id), v: card.v, order: 1000 + i, pile: i }));
     this.discardIds = shown.map((c) => c.id);
     if (view.drawn) {
       const holderIdx = view.turn;
       const holder = view.players[holderIdx];
       const known = view.drawn.v !== null;
       const pose = holder?.id === me ? { ...L.handMine, flip: known ? 0 : Math.PI } : opponentHandPose(L.seats[holderIdx], known);
-      out.set(view.drawn.id, { pose, v: view.drawn.v, order: 2000 });
+      out.set(view.drawn.id, { pose, v: view.drawn.v, order: 2000, pile: -1 });
     }
     return out;
   }
 
   // ---------- sync ----------
 
-  /** The last state shown, for tests and debugging */
-  view: GameState | null = null;
-
   sync(view: GameState, me: string, opts: SyncOptions = {}) {
     if (!this.layout) return;
     this.view = view;
+    this.setTurn(view);
+    if (opts.instant) {
+      this.ttAngle = this.ttFrom = this.ttGoal;
+      this.turntable.rotation.y = this.ttAngle;
+    }
     const homes = this.homes(view, me);
     const now = performance.now();
     const pace = opts.pace ?? 1;
@@ -398,6 +505,7 @@ export class TableStage {
         this.cards.set(id, obj);
       }
       obj.setValue(h.v);
+      obj.pile = h.pile;
       if (samePose(obj.target, h.pose) && !opts.instant) return;
       obj.target = { ...h.pose };
       if (opts.instant || this.reduced) {
@@ -414,7 +522,6 @@ export class TableStage {
     if (opts.instant) this.deckHeight = this.deckGoal;
     const top = view.discard[view.discard.length - 1];
     this.topDiscard = top ? top.id : null;
-    this.setTurn(view);
     this.refreshInteractive();
     this.invalidate();
   }
@@ -426,6 +533,7 @@ export class TableStage {
       o = obj;
       o.id = id;
       o.v = null;
+      o.pile = -1;
       o.front.material = faceMaterial(null);
       o.front.userData.cardId = id;
       o.back.userData.cardId = id;
@@ -459,6 +567,7 @@ export class TableStage {
     const obj = this.cards.get(id);
     if (!obj) return Promise.resolve();
     obj.target = { ...pose };
+    obj.pile = -1;
     if (this.reduced) {
       obj.pose = { ...pose };
       obj.apply();
@@ -494,7 +603,7 @@ export class TableStage {
     this.invalidate();
   }
 
-  /** Resolves when nothing moves any more */
+  /** Resolves when nothing moves any more (cards and the turntable) */
   settled(): Promise<void> {
     if (!this.moving()) return Promise.resolve();
     this.invalidate();
@@ -502,6 +611,7 @@ export class TableStage {
   }
 
   private moving() {
+    if (this.ttAngle !== this.ttGoal) return true;
     for (const o of this.cards.values()) if (o.tween) return true;
     return false;
   }
@@ -535,11 +645,40 @@ export class TableStage {
     return id === this.topDiscard;
   }
 
+  /** Screen position (client px) of a card or pile, for tests and debugging */
+  screenOf(what: number | 'deck' | 'discard' | 'toss'): { x: number; y: number } | null {
+    if (!this.camera || !this.canvas || !this.layout) return null;
+    const v = new THREE.Vector3();
+    if (typeof what === 'number') {
+      const o = this.cards.get(what);
+      if (!o) return null;
+      o.group.getWorldPosition(v);
+    } else if (what === 'toss') {
+      v.set(this.layout.toss.x, this.tossY + 0.17, this.layout.toss.z);
+    } else {
+      const p = what === 'deck' ? this.layout.deck : this.layout.discard;
+      const w = this.onTurntable(p.x, p.z);
+      v.set(w.x, TT_H + (what === 'deck' ? this.deckHeight : CARD_T), w.z);
+    }
+    v.project(this.camera);
+    const r = this.canvas.getBoundingClientRect();
+    return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
+  }
+
   /** Advance animations; returns true while something still moves */
   update(dt: number): boolean {
     const now = performance.now();
     let active = false;
     const k = 1 - Math.exp(-dt * 16);
+    // the turntable eases round; resting pile cards ride along
+    let turned = false;
+    if (this.ttAngle !== this.ttGoal) {
+      const t = this.ttDur > 0 ? Math.min(1, (now - this.ttT0) / this.ttDur) : 1;
+      this.ttAngle = t >= 1 ? this.ttGoal : lerp(this.ttFrom, this.ttGoal, EASE_IO(t));
+      this.turntable.rotation.y = this.ttAngle;
+      turned = true;
+      active = true;
+    }
     this.cards.forEach((o) => {
       let changed = false;
       const tw = o.tween;
@@ -550,7 +689,8 @@ export class TableStage {
           const e = EASE_IO(t);
           const ep = EASE(t);
           const f = tw.from;
-          const to = tw.to;
+          // a card flying onto the pile aims at where the pile is now
+          const to = o.pile >= 0 ? this.discardPose(o.pile, o.id) : tw.to;
           o.pose.x = lerp(f.x, to.x, e);
           o.pose.z = lerp(f.z, to.z, e);
           o.pose.y = lerp(f.y, to.y, e) + tw.arc * 4 * t * (1 - t);
@@ -561,10 +701,14 @@ export class TableStage {
           changed = true;
         }
         if (t >= 1) {
-          o.pose = { ...tw.to };
+          o.pose = o.pile >= 0 ? this.discardPose(o.pile, o.id) : { ...tw.to };
           o.tween = null;
           tw.resolve?.();
         }
+      } else if (turned && o.pile >= 0) {
+        o.pose = this.discardPose(o.pile, o.id);
+        o.target = { ...o.pose };
+        changed = true;
       }
       if (Math.abs(o.lift - o.liftGoal) > 1e-4) {
         o.lift += (o.liftGoal - o.lift) * k;
@@ -587,32 +731,43 @@ export class TableStage {
       active = true;
     }
     this.deckMesh.scale.y = Math.max(0.0001, this.deckHeight);
-    this.deckRing.position.y = 0.0015;
     // riffle: the deck sways briefly after a reshuffle
+    const dx = this.layout?.deck.x ?? 0;
     if (this.shuffleT > 0) {
       const t = (now - this.shuffleT) / 520;
       if (t >= 1) {
         this.shuffleT = -1;
         this.deckMesh.rotation.y = 0;
-        this.deckMesh.position.x = this.layout?.deck.x ?? 0;
+        this.deckMesh.position.x = dx;
       } else {
         this.deckMesh.rotation.y = Math.sin(t * Math.PI * 4) * 0.12 * (1 - t);
-        this.deckMesh.position.x = (this.layout?.deck.x ?? 0) + Math.sin(t * Math.PI * 3) * 0.06 * (1 - t);
+        this.deckMesh.position.x = dx + Math.sin(t * Math.PI * 3) * 0.06 * (1 - t);
         active = true;
       }
     }
-    // discard button: a spring toward up or down, so it pops out with a small overshoot
-    const goal = this.tossActive ? (this.pileHover === 'toss' ? 0.2 : 0.16) : -0.75;
+    // discard button: a spring toward up or flush, so it pops out with a small overshoot
+    const goal = this.tossActive ? (this.pileHover === 'toss' ? 0.4 : 0.34) : -0.06;
     const press = this.tossPress > 0 ? Math.max(0, 1 - (now - this.tossPress) / 220) : 0;
     if (press === 0) this.tossPress = -1;
     const d = goal - press * 0.1 - this.tossY;
     if (Math.abs(d) > 1e-4 || Math.abs(this.tossV) > 1e-4 || press > 0) {
-      const h = Math.min(dt, 1 / 30);
-      this.tossV += (d * 180 - this.tossV * 16) * h;
-      this.tossY += this.tossV * h;
-      this.toss.position.y = this.tossY;
-      this.toss.visible = this.tossY > -0.72;
-      this.tossSlot.visible = this.toss.visible;
+      // fixed small steps keep the spring stable however long the frame was
+      let left = Math.min(dt, 0.25);
+      while (left > 0) {
+        const h = Math.min(left, 1 / 120);
+        const dd = goal - press * 0.1 - this.tossY;
+        this.tossV += (dd * 180 - this.tossV * 15) * h;
+        this.tossY += this.tossV * h;
+        left -= h;
+      }
+      if (Math.abs(goal - this.tossY) < 1e-4 && Math.abs(this.tossV) < 1e-3 && press === 0) {
+        this.tossY = goal;
+        this.tossV = 0;
+      }
+      this.tossMoving.position.y = this.tossY;
+      // the enamel brightens as the button comes up: dull while it cannot be pressed
+      const lit = Math.min(1, Math.max(0, (this.tossY + 0.06) / 0.4));
+      this.tossLacquer?.color.copy(TableStage.CAP_OFF).lerp(TableStage.CAP_ON, lit);
       active = true;
     }
     this.mats.forEach((m) => {
@@ -627,28 +782,6 @@ export class TableStage {
       w.forEach((r) => r());
     }
     return active;
-  }
-
-  camera: THREE.Camera | null = null;
-  canvas: HTMLElement | null = null;
-
-  /** Screen position (client px) of a card or pile, for tests and debugging */
-  screenOf(what: number | 'deck' | 'discard' | 'toss'): { x: number; y: number } | null {
-    if (!this.camera || !this.canvas || !this.layout) return null;
-    const v = new THREE.Vector3();
-    if (typeof what === 'number') {
-      const o = this.cards.get(what);
-      if (!o) return null;
-      o.group.getWorldPosition(v);
-    } else if (what === 'toss') {
-      v.set(this.layout.toss.x, this.tossY + 0.1, this.layout.toss.z);
-    } else {
-      const p = what === 'deck' ? this.layout.deck : this.layout.discard;
-      v.set(p.x, what === 'deck' ? this.deckHeight : CARD_T, p.z);
-    }
-    v.project(this.camera);
-    const r = this.canvas.getBoundingClientRect();
-    return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
   }
 
   /** Let anything that waits on this stage go; the scene itself stays intact so a remount can reuse it */

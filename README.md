@@ -22,7 +22,9 @@ Add `?net=local` to the URL to play across tabs of one browser without any netwo
 
 The game is played in first person at a round table by default (three.js through @react-three/fiber). You see the table from your chair: your own cards in front of you, the others sitting across and beside you, a lamp hanging over the table. Drag to look around; your view turns back to the table when you let go. The **2D / 3D** switch in the top bar changes the view at any time, also mid-game; the choice is remembered. Without WebGL, or if the 3D view fails to start, the 2D table is used. `?view=2d` forces 2D.
 
-- When you hold a card drawn from the deck, a **Discard** button rises out of the table next to your cards.
+- The game takes place in a **bar** around the table (counter, back bar with bottles, stools, windows). Rooms are separate modules in `components/three/rooms/`; more can be added there and picked by id.
+- Deck and discard pile sit on a **turntable** in the middle of the table that turns to face whoever's turn it is.
+- When you hold a card drawn from the deck, the red **Discard** button in its brass bezel rises out of the table next to your cards.
 - Card faces, backs, felt and wood are drawn on canvases at runtime; there are no image files.
 - Every step from the engine is played as animate → commit → wait for the cards to land, for both views (`Animator` in `anim.ts`).
 - Phones: the pixel ratio is capped at 1.5, there is one shadow-casting lamp with a 1024 px shadow map, and frames are only rendered while something moves.
@@ -55,7 +57,8 @@ components/       Card, PlayerBoard, Table, Scoreboard, Screens, Icon,
                   useTableModel (what can be clicked, status line; shared by 2D and 3D),
                   viewMode (2D/3D choice, WebGL check)
 components/three/ Table3D (canvas, room, lamp, camera at your eyes, name plates),
-                  stage (card objects, flights, discard button), characters (people at the table),
+                  stage (card objects, flights, turntable, discard button), characters (people at the table),
+                  rooms/ (the world around the table: Bar, room registry),
                   characterModels (your .glb files), layout (seats, eye position, camera fit),
                   textures (canvas-drawn cards), animator3d
 ```

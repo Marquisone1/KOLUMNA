@@ -481,54 +481,79 @@ button.card { display: inline-block; }
 
 /* ---------- 3D table ---------- */
 
-.table3d { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #141210; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.table3d { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #120e0b; touch-action: none; user-select: none; -webkit-user-select: none; }
 .table3d > div:first-child { position: absolute !important; inset: 0; }
 .table3d canvas { display: block; outline: none; }
 .table3d-loading { display: grid; place-items: center; color: var(--text-2); }
+.game.is-3d .topbar-game { background: rgba(18, 14, 11, 0.92); border-bottom-color: rgba(227, 163, 74, 0.12); }
 
 .hud3d {
   position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 5;
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   width: min(560px, calc(100% - 24px)); text-align: center; pointer-events: none;
 }
-.hud3d .status-main { font-size: 15px; text-wrap: balance; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
-.hud3d .status-final { font-size: 13px; color: var(--accent); }
-.hud3d .btn { pointer-events: auto; }
+.status-pill {
+  display: inline-flex; align-items: center; gap: 10px; max-width: 100%;
+  padding: 8px 16px; border-radius: 999px;
+  background: rgba(20, 16, 13, 0.82); border: 1px solid rgba(239, 233, 222, 0.1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  animation: rise 260ms var(--ease) both;
+}
+.status-pill .status-main { font-size: 14px; line-height: 20px; text-wrap: balance; color: var(--text-2); }
+.status-pill.tone-mine { border-color: rgba(227, 163, 74, 0.45); }
+.status-pill.tone-mine .status-main { color: var(--text); font-weight: 500; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; animation: beat 1.6s var(--ease) infinite; }
+@keyframes beat { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.hud3d .status-final {
+  font-size: 12px; color: var(--accent); padding: 3px 10px; border-radius: 999px;
+  background: rgba(20, 16, 13, 0.75); border: 1px solid rgba(227, 163, 74, 0.25);
+}
 .toast3d {
-  padding: 8px 12px; border-radius: 10px; font-size: 13px; white-space: nowrap;
-  background: var(--raised); border: 1px solid var(--hair-strong); color: var(--text);
+  padding: 8px 14px; border-radius: 999px; font-size: 13px; white-space: nowrap;
+  background: rgba(239, 233, 222, 0.94); color: #1a1714; font-weight: 500;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   animation: rise 260ms var(--ease) both;
 }
 
 .plate3d {
   position: absolute; z-index: 4; transform: translate(-50%, -100%);
-  display: inline-flex; align-items: center; gap: 6px; max-width: 46vw;
-  height: 26px; padding: 0 8px; border-radius: 8px;
-  background: rgba(22, 21, 19, 0.94); border: 1px solid var(--hair-strong);
+  display: inline-flex; align-items: center; gap: 7px; max-width: 46vw;
+  height: 30px; padding: 0 10px 0 3px; border-radius: 999px;
+  background: rgba(20, 16, 13, 0.86); border: 1px solid rgba(239, 233, 222, 0.1);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
   font-size: 12px; color: var(--text-2); white-space: nowrap;
-  transition: border-color 200ms var(--ease), color 200ms var(--ease);
+  transition: border-color 200ms var(--ease), box-shadow 200ms var(--ease);
   pointer-events: none;
 }
+.plate-avatar {
+  display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; flex: none;
+  background: var(--seat); color: #17130f; font-size: 12px; font-weight: 600;
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.18);
+}
 .plate3d .btn { pointer-events: auto; }
-.plate3d .board-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; color: var(--text); }
-.plate3d.is-turn { border-color: var(--seat); }
-.plate3d.is-turn .board-name { font-weight: 600; }
+.plate3d .board-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; color: var(--text); font-weight: 500; }
+.plate3d .tag { height: 18px; background: rgba(239, 233, 222, 0.07); }
+.plate3d.is-turn { border-color: var(--seat); box-shadow: 0 0 0 1px var(--seat), 0 6px 18px rgba(0, 0, 0, 0.35); }
 .plate3d.is-offline { opacity: 0.7; }
-.plate3d.is-me { left: 50%; top: auto; bottom: 10px; transform: translateX(-50%); font-size: 13px; }
-.plate-score { color: var(--text); font-weight: 600; }
+.plate3d.is-me { left: 50%; top: auto; bottom: 10px; transform: translateX(-50%); font-size: 13px; height: 34px; }
+.plate3d.is-me .plate-avatar { width: 28px; height: 28px; font-size: 13px; }
+.plate-score { color: var(--text); font-weight: 600; padding-left: 7px; border-left: 1px solid rgba(239, 233, 222, 0.12); }
 .plate-total { color: var(--text-2); }
 .pile-tag3d {
   position: absolute; z-index: 3; transform: translate(-50%, 2px);
+  padding: 2px 8px; border-radius: 999px; background: rgba(20, 16, 13, 0.7);
   font-size: 11px; color: var(--text-2); pointer-events: none; white-space: nowrap;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
 
 @media (max-width: 720px) {
-  .plate3d { height: 22px; padding: 0 6px; gap: 4px; font-size: 11px; }
+  .plate3d { height: 26px; padding: 0 8px 0 2px; gap: 5px; font-size: 11px; }
+  .plate-avatar { width: 20px; height: 20px; font-size: 11px; }
   .plate3d .board-name { max-width: 64px; }
   .plate3d:not(.is-me) .plate-total, .plate3d:not(.is-me) .tag { display: none; }
   .hud3d { top: 8px; }
-  .hud3d .status-main { font-size: 14px; }
+  .status-pill { padding: 7px 12px; }
+  .status-pill .status-main { font-size: 13px; }
 }
 
 /* ---------- small screens ---------- */

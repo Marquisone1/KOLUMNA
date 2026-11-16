@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Action, GameEvent, GameState, PeerHover } from '../../game/types';
@@ -9,10 +9,11 @@ import { domAnimator } from '../../anim';
 import { useTableModel } from '../useTableModel';
 import { SEAT_COLORS } from '../PlayerBoard';
 import { Icon } from '../Icon';
-import { TableStage, stageRef } from './stage';
+import { TableStage, TT_H, stageRef } from './stage';
 import { Characters } from './characters';
 import { computeLayout, type Layout } from './layout';
-import { feltTexture, loadCardFonts, redrawCards, setAnisotropy, woodTexture } from './textures';
+import { feltTexture, leatherTexture, loadCardFonts, redrawCards, setAnisotropy, woodTexture } from './textures';
+import { DEFAULT_ROOM, ROOMS, type RoomId } from './rooms';
 import { threeAnimator } from './animator3d';
 
 interface Props {
@@ -25,6 +26,8 @@ interface Props {
   send: (a: Action) => void;
   onHover?: (h: PeerHover | null) => void;
   animator: RefObject<Animator>;
+  /** where the table stands */
+  room?: RoomId;
 }
 
 // Room for the HTML status at the top and your own name plate at the bottom, in px
@@ -42,7 +45,7 @@ interface Overlay {
 /** Looking around: drag offsets for the head, eased back once you let go */
 interface Look { yaw: number; pitch: number; dragging: boolean }
 
-export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, onHover, animator }: Props) {
+export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, onHover, animator, room = DEFAULT_ROOM }: Props) {
   const { t } = useI18n();
   const m = useTableModel(view, me, busy, lastEv, send);
   const stage = useMemo(() => new TableStage(), []);
@@ -248,27 +251,36 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
           dpr={[1, Math.min(typeof devicePixelRatio === 'number' ? devicePixelRatio : 1, size.w < 700 ? 1.5 : 1.75)]}
           frameloop="demand"
           gl={{ antialias: true, powerPreference: 'high-performance', alpha: false }}
-          camera={{ fov: layout.camera.fov, near: 0.2, far: 160, position: layout.camera.pos.toArray() as [number, number, number] }}
+          camera={{ fov: layout.camera.fov, near: 0.2, far: 200, position: layout.camera.pos.toArray() as [number, number, number] }}
           onCreated={({ gl, scene }) => {
             gl.toneMapping = THREE.NeutralToneMapping;
             gl.toneMappingExposure = 1;
-            scene.background = new THREE.Color('#110f0d');
-            scene.fog = new THREE.Fog('#110f0d', 30, 70);
+            scene.background = new THREE.Color('#120e0b');
+            scene.fog = new THREE.Fog('#120e0b', 45, 130);
             setAnisotropy(gl.capabilities.getMaxAnisotropy());
           }}
           onPointerMissed={onOut}
         >
           <CameraRig layout={layout} look={look} invalidateRef={invalidateRef} />
-          <Room layout={layout} mobile={size.w < 700} />
+          <Reflections />
+          <TableAndLamp layout={layout} mobile={size.w < 700} />
+          <Suspense fallback={null}>
+            <RoomView id={room} tableRadius={layout.table.r} mobile={size.w < 700} />
+          </Suspense>
           <StageDriver stage={stage} chars={chars} />
           <primitive object={chars.root} />
           <primitive object={stage.root} onPointerMove={onMove} onPointerOut={onOut} onClick={onClick} />
-          <OverlayDriver overlay={overlay} chars={chars} layout={layout} />
+          <OverlayDriver overlay={overlay} chars={chars} layout={layout} stage={stage} />
         </Canvas>
       )}
 
       <div className="hud3d" aria-live="polite">
-        <p className={'status-main tone-' + m.tone}>{m.status}</p>
+        {m.status && (
+          <div className={'status-pill tone-' + m.tone}>
+            {m.tone === 'mine' && <span className="status-dot" aria-hidden="true" />}
+            <p className="status-main">{m.status}</p>
+          </div>
+        )}
         {m.finalNote && <p className="status-final">{m.finalNote}</p>}
         {/* the real button rises out of the table; this one is for keyboards and screen readers */}
         {m.canToss && (
@@ -294,7 +306,7 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
             className={'plate3d' + (isTurn ? ' is-turn' : '') + (!p.connected ? ' is-offline' : '')}
             style={{ '--seat': SEAT_COLORS[p.seat % 6] } as CSSProperties}
           >
-            <span className="seat-dot" />
+            <span className="plate-avatar" aria-hidden="true">{p.name.slice(0, 1).toUpperCase()}</span>
             <span className="board-name">{p.name}</span>
             {p.bot && <span className="tag"><Icon name="bot" size={12} />{t('bot')}</span>}
             {!p.connected && !p.bot && <span className="tag tag-warn"><Icon name="wifiOff" size={12} />{t('offline')}</span>}
@@ -316,7 +328,7 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
           className={'plate3d is-me' + (view.phase === 'play' && current?.id === me ? ' is-turn' : '')}
           style={{ '--seat': SEAT_COLORS[meP.seat % 6] } as CSSProperties}
         >
-          <span className="seat-dot" />
+          <span className="plate-avatar" aria-hidden="true">{meP.name.slice(0, 1).toUpperCase()}</span>
           <span className="board-name">{meP.name}<span className="muted"> · {t('you')}</span></span>
           {view.finisher === me && view.phase === 'play' && <span className="tag tag-accent">{t('wentOut')}</span>}
           <span className="plate-score tabular" title={t('visible')}>{visibleSum(meP)}</span>
@@ -325,6 +337,11 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
       )}
     </div>
   );
+}
+
+function RoomView({ id, tableRadius, mobile }: { id: RoomId; tableRadius: number; mobile: boolean }) {
+  const Room = ROOMS[id].component;
+  return <Room tableRadius={tableRadius} mobile={mobile} />;
 }
 
 /** The camera is your eyes: fixed at your seat, turned by dragging, easing back to the table */
@@ -373,7 +390,7 @@ function StageDriver({ stage, chars }: { stage: TableStage; chars: Characters })
   useEffect(() => {
     stage.camera = camera;
     stage.canvas = gl.domElement;
-    if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) (window as unknown as { __k3d?: TableStage }).__k3d = stage;
+    if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) Object.assign(window as object, { __k3d: stage, __gl: gl });
   }, [stage, camera, gl]);
   useEffect(() => {
     stage.invalidate = () => invalidate();
@@ -384,7 +401,7 @@ function StageDriver({ stage, chars }: { stage: TableStage; chars: Characters })
     return () => { alive = false; stage.invalidate = () => {}; chars.invalidate = () => {}; };
   }, [stage, chars, invalidate]);
   useFrame((_, dt) => {
-    const d = Math.min(dt, 0.05);
+    const d = Math.min(dt, 0.25);
     const a = stage.update(d);
     const b = chars.update(d);
     if (a || b) invalidate();
@@ -393,7 +410,7 @@ function StageDriver({ stage, chars }: { stage: TableStage; chars: Characters })
 }
 
 /** Each frame: put the name plates over the heads and the deck count under the deck */
-function OverlayDriver({ overlay, chars, layout }: { overlay: RefObject<Overlay>; chars: Characters; layout: Layout }) {
+function OverlayDriver({ overlay, chars, layout, stage }: { overlay: RefObject<Overlay>; chars: Characters; layout: Layout; stage: TableStage }) {
   const { camera, size } = useThree();
   const v = useMemo(() => new THREE.Vector3(), []);
   // name plates stay on screen even when the head is out of view; the deck tag just hides
@@ -421,68 +438,73 @@ function OverlayDriver({ overlay, chars, layout }: { overlay: RefObject<Overlay>
       if (chars.headOf(id, v)) place(el, v, true);
       else el.style.visibility = 'hidden';
     });
-    if (o.deck) place(o.deck, v.set(layout.deck.x, 0, layout.deck.z + 0.62), false);
+    if (o.deck) { const w = stage.worldOnTurntable(layout.deck.x, layout.deck.z + 0.66); place(o.deck, v.set(w.x, TT_H, w.z), false); }
   });
   return null;
 }
 
-/** The room: a round table with a wooden rail, a floor, and the lamp hanging over it */
-function Room({ layout, mobile }: { layout: Layout; mobile: boolean }) {
+/** The card table: felt top, brass inlay, a padded leather armrest, a turned pedestal; and the lamp over it */
+function TableAndLamp({ layout, mobile }: { layout: Layout; mobile: boolean }) {
   const r = layout.table.r;
-  const felt = useMemo(() => feltTexture(), []);
-  const wood = useMemo(() => woodTexture(), []);
-  const floorTex = useMemo(() => {
-    const t = woodTexture();
-    t.repeat.set(4, 40);
-    return t;
+  const tex = useMemo(() => {
+    const felt = feltTexture();
+    const wood = woodTexture('#4a2c1a', 90);
+    wood.repeat.set(10, 1);
+    const leather = leatherTexture('#2a1712');
+    return { felt, wood, leather };
   }, []);
   const lampTarget = useMemo(() => new THREE.Object3D(), []);
   const lampH = 13;
-  const geos = useMemo(() => {
-    const top = new THREE.CircleGeometry(r, 96);
+  const parts = useMemo(() => {
+    const top = new THREE.CircleGeometry(r, 128);
     top.rotateX(-Math.PI / 2);
     const uv = top.attributes.uv;
     const pos = top.attributes.position;
-    for (let i = 0; i < pos.count; i++) uv.setXY(i, pos.getX(i) / 2.2, pos.getZ(i) / 2.2);
-    const ring = new THREE.Shape();
-    ring.absarc(0, 0, r + 0.55, 0, Math.PI * 2, false);
-    const hole = new THREE.Path();
-    hole.absarc(0, 0, r, 0, Math.PI * 2, true);
-    ring.holes.push(hole);
-    const rail = new THREE.ExtrudeGeometry(ring, { depth: 0.18, bevelEnabled: true, bevelThickness: 0.07, bevelSize: 0.07, bevelSegments: 3, curveSegments: 96 });
-    rail.rotateX(-Math.PI / 2);
-    rail.translate(0, -0.1, 0);
-    const rpos = rail.attributes.position;
+    for (let i = 0; i < pos.count; i++) uv.setXY(i, pos.getX(i) / (2 * r) + 0.5, -pos.getZ(i) / (2 * r) + 0.5);
+    // padded leather armrest: a flattened torus around the felt
+    const rail = new THREE.TorusGeometry(r + 0.42, 0.46, 20, 160);
+    rail.rotateX(Math.PI / 2);
+    rail.scale(1, 0.62, 1);
+    rail.translate(0, 0.1, 0);
     const ruv = rail.attributes.uv;
-    for (let i = 0; i < rpos.count; i++) {
-      const x = rpos.getX(i);
-      const z = rpos.getZ(i);
-      ruv.setXY(i, (Math.atan2(z, x) / (Math.PI * 2)) * 18, rpos.getY(i) * 2 + Math.hypot(x, z) * 0.8);
-    }
-    const apron = new THREE.CylinderGeometry(r + 0.45, r + 0.45, 0.9, 96, 1, true);
-    apron.translate(0, -0.55, 0);
-    return { top, rail, apron };
+    for (let i = 0; i < ruv.count; i++) ruv.setXY(i, ruv.getX(i) * 30, ruv.getY(i));
+    // wooden apron below the rail
+    const apron = new THREE.CylinderGeometry(r + 0.55, r + 0.35, 1.2, 128, 1, true);
+    apron.translate(0, -0.75, 0);
+    const inlay = new THREE.RingGeometry(r - 0.06, r - 0.02, 160);
+    inlay.rotateX(-Math.PI / 2);
+    inlay.translate(0, 0.002, 0);
+    return { top, rail, apron, inlay };
   }, [r]);
   const mats = useMemo(() => ({
-    rail: new THREE.MeshStandardMaterial({ map: wood, roughness: 0.55 }),
-    apron: new THREE.MeshStandardMaterial({ map: wood, roughness: 0.7 }),
-  }), [wood]);
-  useEffect(() => () => { geos.top.dispose(); geos.rail.dispose(); geos.apron.dispose(); }, [geos]);
+    felt: new THREE.MeshStandardMaterial({ map: tex.felt, roughness: 0.97, envMapIntensity: 0.2 }),
+    rail: new THREE.MeshStandardMaterial({ map: tex.leather, roughness: 0.48, envMapIntensity: 0.7 }),
+    wood: new THREE.MeshStandardMaterial({ map: tex.wood, roughness: 0.4, envMapIntensity: 0.9 }),
+    brass: new THREE.MeshStandardMaterial({ color: '#c9a063', roughness: 0.3, metalness: 1, envMapIntensity: 1.1 }),
+    pedestal: new THREE.MeshStandardMaterial({ map: tex.wood, roughness: 0.45, envMapIntensity: 0.8 }),
+  }), [tex]);
+  useEffect(() => () => {
+    Object.values(parts).forEach((g) => g.dispose());
+  }, [parts]);
+  useEffect(() => () => {
+    Object.values(mats).forEach((m) => m.dispose());
+    Object.values(tex).forEach((t) => t.dispose());
+  }, [mats, tex]);
   const shadowSize = mobile ? 1024 : 2048;
   return (
     <group>
-      <hemisphereLight args={['#fff0dc', '#1a120c', 0.5]} />
+      <hemisphereLight args={['#ffe9cf', '#1a120c', 0.35]} />
       {/* soft fill from behind your shoulder so faces and the card in your hand are not black */}
-      <directionalLight position={[2, 9, r + 14]} intensity={0.7} color="#ffe7c8" />
+      <directionalLight position={[2, 9, r + 14]} intensity={0.55} color="#ffe7c8" />
       {/* the lamp over the table */}
       <spotLight
         position={[0, lampH - 0.6, 0]}
         target={lampTarget}
         angle={Math.atan((r + 3.5) / lampH)}
-        penumbra={0.6}
+        penumbra={0.55}
         decay={0}
-        intensity={4.4}
-        color="#ffe0b5"
+        intensity={4.6}
+        color="#ffdcae"
         castShadow
         shadow-mapSize={[shadowSize, shadowSize]}
         shadow-bias={-0.0004}
@@ -494,48 +516,75 @@ function Room({ layout, mobile }: { layout: Layout; mobile: boolean }) {
       <primitive object={lampTarget} />
       <Lamp y={lampH} />
 
-      <mesh geometry={geos.top} receiveShadow castShadow>
-        <meshStandardMaterial map={felt} roughness={0.96} metalness={0} />
+      <mesh geometry={parts.top} material={mats.felt} receiveShadow castShadow />
+      <mesh geometry={parts.inlay} material={mats.brass} />
+      <mesh geometry={parts.rail} material={mats.rail} castShadow receiveShadow />
+      <mesh geometry={parts.apron} material={mats.wood} />
+      {/* turned pedestal and foot */}
+      <mesh position={[0, (FLOOR_Y - 1.4) / 2, 0]} material={mats.pedestal} castShadow>
+        <cylinderGeometry args={[0.9, 1.3, -FLOOR_Y - 1.4, 32]} />
       </mesh>
-      <mesh geometry={geos.rail} castShadow receiveShadow material={mats.rail} />
-      <mesh geometry={geos.apron} material={mats.apron} />
-      {/* pedestal and foot */}
-      <mesh position={[0, (FLOOR_Y - 1) / 2, 0]} castShadow>
-        <cylinderGeometry args={[0.9, 1.3, -FLOOR_Y - 1, 24]} />
-        <meshStandardMaterial color="#3a2417" roughness={0.6} />
+      <mesh position={[0, FLOOR_Y + 1.2, 0]} material={mats.brass}>
+        <torusGeometry args={[1.35, 0.12, 10, 40]} />
       </mesh>
-      <mesh position={[0, FLOOR_Y + 0.25, 0]} receiveShadow>
-        <cylinderGeometry args={[3.2, 3.6, 0.5, 32]} />
-        <meshStandardMaterial color="#3a2417" roughness={0.6} />
-      </mesh>
-      <mesh rotation-x={-Math.PI / 2} position={[0, FLOOR_Y, 0]} receiveShadow>
-        <planeGeometry args={[120, 120]} />
-        <meshStandardMaterial map={floorTex} color="#6b5444" roughness={0.85} />
-      </mesh>
+      {[0, 1, 2, 3].map((k) => (
+        <mesh key={k} position={[0, FLOOR_Y + 0.35, 0]} rotation-y={(k * Math.PI) / 2} material={mats.pedestal} castShadow>
+          <boxGeometry args={[0.9, 0.7, 7]} />
+        </mesh>
+      ))}
     </group>
   );
 }
 
-/** A plain pendant: cord, dark enamel shade, the bulb inside it */
+/** A plain pendant: cord, dark enamel shade with a brass band, the bulb inside it */
 function Lamp({ y }: { y: number }) {
-  const shadeGeo = useMemo(() => {
-    const pts = [new THREE.Vector2(0.35, 1.6), new THREE.Vector2(0.6, 1.45), new THREE.Vector2(1.6, 0.55), new THREE.Vector2(2.6, 0.0)];
-    return new THREE.LatheGeometry(pts, 48);
+  const parts = useMemo(() => {
+    const pts = [new THREE.Vector2(0.35, 1.7), new THREE.Vector2(0.62, 1.55), new THREE.Vector2(1.7, 0.6), new THREE.Vector2(2.7, 0.05), new THREE.Vector2(2.72, 0)];
+    return { shade: new THREE.LatheGeometry(pts, 64), band: new THREE.TorusGeometry(2.71, 0.05, 8, 64).rotateX(Math.PI / 2) };
   }, []);
+  useEffect(() => () => { parts.shade.dispose(); parts.band.dispose(); }, [parts]);
   return (
     <group position={[0, y, 0]}>
       <mesh position={[0, 6, 0]}>
         <cylinderGeometry args={[0.04, 0.04, 9, 6]} />
         <meshStandardMaterial color="#1a1714" />
       </mesh>
-      <mesh geometry={shadeGeo}>
-        <meshStandardMaterial color="#2b3a33" roughness={0.45} metalness={0.2} side={THREE.DoubleSide} />
+      <mesh geometry={parts.shade}>
+        <meshStandardMaterial color="#24332c" roughness={0.35} metalness={0.25} side={THREE.DoubleSide} />
       </mesh>
-      {/* the bulb: lit from inside, a plain bright surface rather than a glow effect */}
-      <mesh position={[0, 0.45, 0]}>
-        <sphereGeometry args={[0.42, 20, 14]} />
+      <mesh geometry={parts.band}>
+        <meshStandardMaterial color="#c9a063" roughness={0.3} metalness={1} />
+      </mesh>
+      {/* the bulb: a plain bright surface rather than a glow effect */}
+      <mesh position={[0, 0.5, 0]}>
+        <sphereGeometry args={[0.45, 20, 14]} />
         <meshBasicMaterial color="#ffe6c2" />
       </mesh>
     </group>
   );
+}
+
+/** Soft reflections for brass, lacquer, glass and polished wood, from a generic room light probe */
+function Reflections() {
+  const { gl, scene } = useThree();
+  useEffect(() => {
+    let alive = true;
+    let env: THREE.Texture | null = null;
+    import('three/examples/jsm/environments/RoomEnvironment.js').then(({ RoomEnvironment }) => {
+      if (!alive) return;
+      const pmrem = new THREE.PMREMGenerator(gl);
+      const room = new RoomEnvironment();
+      env = pmrem.fromScene(room, 0.04).texture;
+      room.dispose();
+      pmrem.dispose();
+      scene.environment = env;
+      scene.environmentIntensity = 0.28;
+    }).catch(() => { /* reflections are a nicety */ });
+    return () => {
+      alive = false;
+      if (scene.environment === env) scene.environment = null;
+      env?.dispose();
+    };
+  }, [gl, scene]);
+  return null;
 }

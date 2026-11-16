@@ -11,7 +11,7 @@ export const PITCH_Z = CARD_H + GAP;
 export const GRID_W = 4 * CARD_W + 3 * GAP;
 export const GRID_D = 3 * CARD_H + 2 * GAP;
 /** Thickness used when stacking cards */
-export const CARD_T = 0.004;
+export const CARD_T = 0.007;
 /** From a grid's centre to the table edge in front of its player */
 export const EDGE = GRID_D / 2 + 1.05;
 /** From a grid's centre to where its player sits */
@@ -43,6 +43,7 @@ export interface Seat {
 
 export interface Layout {
   seats: Seat[];
+  /** on the turntable, in its own frame (it turns to face the player whose turn it is) */
   deck: { x: number; z: number };
   discard: { x: number; z: number };
   toss: { x: number; z: number };
@@ -117,8 +118,9 @@ export function computeLayout(n: number, meIdx: number, aspect: number, hudTop: 
   seats[me] = seatAt(0, R);
   angles.forEach((a, i) => { seats[(me + 1 + i) % n] = seatAt(a, R); });
 
-  const deck = { x: -0.8, z: 0.4 };
-  const discard = { x: 0.15, z: 0.4 };
+  // deck and discard sit side by side on the turntable in the middle (its own frame)
+  const deck = { x: -0.45, z: 0 };
+  const discard = { x: 0.45, z: 0 };
   // the button that rises out of the table, to your right
   const toss = portrait ? { x: 0, z: R + GRID_D / 2 + 0.75 } : { x: GRID_W / 2 + 1.0, z: R + 0.2 };
 
@@ -151,7 +153,7 @@ export function computeLayout(n: number, meIdx: number, aspect: number, hudTop: 
       if (ang < (portrait ? 0.32 : 0.62)) heads.push(h);
     }
   });
-  must.push(new THREE.Vector3(deck.x - 0.4, 0, deck.z - 0.5));
+  must.push(new THREE.Vector3(-1.5, 0, 0), new THREE.Vector3(1.5, 0, 0));
   must.push(new THREE.Vector3(toss.x + 0.5, 0, toss.z + 0.3));
   const camera = fitEyes(eye, [[...must, ...grids, ...heads], [...must, ...grids], must], aspect, hudTop, hudBottom, portrait ? 84 : 70);
   return { seats, deck, discard, toss, handMine, table, eye, camera, portrait };
