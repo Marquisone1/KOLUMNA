@@ -497,3 +497,9 @@ export function spawnExtra(path: string, mode: 'stand' | 'sit', neckHeight = 4.3
     },
   };
 }
+
+/** Fetch and parse every character model ahead of time (shared cache with the table) */
+export function preloadCharacters(): Promise<void> {
+  const paths = [...new Set(CHARACTER_MODELS)];
+  return Promise.all([loadTools(), ...paths.map((p) => loadModel(p).catch(() => null))]).then(() => undefined);
+}

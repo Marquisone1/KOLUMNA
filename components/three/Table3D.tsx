@@ -15,6 +15,7 @@ import { computeLayout, type Layout } from './layout';
 import { feltTexture, leatherTexture, loadCardFonts, redrawCards, setAnisotropy, woodTexture } from './textures';
 import { DEFAULT_ROOM, ROOMS, type RoomId } from './rooms';
 import { threeAnimator } from './animator3d';
+import { preload3d, preloadProgress } from './preload';
 import { FeltBounce, LampHaze, PostEffects, QualityWatch, initialQuality, qualityForced, type Quality } from './Graphics';
 
 interface Props {
@@ -44,7 +45,7 @@ interface Overlay {
 }
 
 /** Looking around: drag offsets for the head, eased back once you let go */
-interface Look { yaw: number; pitch: number; dragging: boolean }
+interface Look { yaw: number; pitch: number; dragging: boolean; follow: boolean }
 
 export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, onHover, animator, room = DEFAULT_ROOM }: Props) {
   const { t } = useI18n();
@@ -54,8 +55,18 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
   const wrap = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const overlay = useRef<Overlay>({ plates: new Map(), deck: null });
-  const look = useRef<Look>({ yaw: 0, pitch: 0, dragging: false });
+  const look = useRef<Look>({ yaw: 0, pitch: 0, dragging: false, follow: false });
   const invalidateRef = useRef<() => void>(() => {});
+  // a loading screen covers the table until every asset is in and the first frames are drawn
+  const [loaded, setLoaded] = useState(false);
+  const [shown, setShown] = useState(false);
+  const [progress, setProgress] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    const off = preloadProgress((d, total) => alive && setProgress(total ? d / total : 0));
+    preload3d().then(() => alive && setLoaded(true));
+    return () => { alive = false; off(); };
+  }, []);
   // graphics quality: decided once from the device, stepped down if frames stay slow
   const [quality, setQuality] = useState<Quality | null>(null);
 
@@ -132,16 +143,26 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
     stage.refreshInteractive();
   });
 
-  // Drag anywhere to look around; the head turns back when you let go
+  // Looking around. With a mouse the view follows the pointer near the screen edges and stays still in the
+  // middle, where the cards are, so nothing slides away under the pointer. It turns back when the pointer
+  // leaves. On touch screens you drag instead; the view turns back when you let go.
   useEffect(() => {
     const el = wrap.current;
     if (!el) return;
+    const edge = (n: number) => Math.sign(n) * Math.max(0, Math.abs(n) - 0.55) / 0.45;
     let start: { x: number; y: number; yaw: number; pitch: number; id: number } | null = null;
-    const down = (e: PointerEvent) => {
-      if ((e.target as HTMLElement).closest('button')) return;
-      start = { x: e.clientX, y: e.clientY, yaw: look.current.yaw, pitch: look.current.pitch, id: e.pointerId };
-    };
     const move = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse') {
+        const r = el.getBoundingClientRect();
+        const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
+        const ny = ((e.clientY - r.top) / r.height) * 2 - 1;
+        look.current.follow = true;
+        look.current.yaw = Math.max(-1, Math.min(1, edge(nx))) * 1.15;
+        // only upward: looking down past your own cards shows nothing new
+        look.current.pitch = -Math.max(-1, Math.min(0, edge(ny))) * 0.42;
+        invalidateRef.current();
+        return;
+      }
       if (!start || e.pointerId !== start.id) return;
       const dx = e.clientX - start.x;
       const dy = e.clientY - start.y;
@@ -152,18 +173,29 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
       look.current.pitch = Math.max(-0.45, Math.min(0.45, start.pitch + dy * k));
       invalidateRef.current();
     };
+    const down = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse' || (e.target as HTMLElement).closest('button')) return;
+      start = { x: e.clientX, y: e.clientY, yaw: look.current.yaw, pitch: look.current.pitch, id: e.pointerId };
+    };
     const up = (e: PointerEvent) => {
       if (!start || e.pointerId !== start.id) return;
       start = null;
       // let the click handler see that this was a drag, then release
       setTimeout(() => { look.current.dragging = false; invalidateRef.current(); }, 0);
     };
+    const leave = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') return;
+      look.current.follow = false;
+      invalidateRef.current();
+    };
     el.addEventListener('pointerdown', down);
+    el.addEventListener('pointerleave', leave);
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
     return () => {
       el.removeEventListener('pointerdown', down);
+      el.removeEventListener('pointerleave', leave);
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
@@ -280,8 +312,16 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
           <primitive object={chars.root} />
           <primitive object={stage.root} onPointerMove={onMove} onPointerOut={onOut} onClick={onClick} />
           <OverlayDriver overlay={overlay} chars={chars} layout={layout} stage={stage} />
+          {loaded && !shown && <FirstFrames onDone={() => setShown(true)} />}
         </Canvas>
       )}
+
+      <div className={'loading3d' + (shown ? ' is-done' : '')} aria-hidden={shown}>
+        <div className="loading3d-card">
+          <p className="loading3d-title">{t('loadingTable')}</p>
+          <div className="loading3d-bar"><span style={{ transform: `scaleX(${loaded ? 1 : Math.max(0.08, progress)})` }} /></div>
+        </div>
+      </div>
 
       <div className="hud3d" aria-live="polite">
         {m.status && (
@@ -348,6 +388,19 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
   );
 }
 
+/** Waits a few rendered frames so the room, models and textures are on the GPU before the curtain lifts */
+function FirstFrames({ onDone }: { onDone: () => void }) {
+  const n = useRef(0);
+  const { invalidate } = useThree();
+  useFrame(() => {
+    n.current++;
+    if (n.current === 4) onDone();
+    else if (n.current < 4) invalidate();
+  });
+  useEffect(() => { invalidate(); }, [invalidate]);
+  return null;
+}
+
 function RoomView({ id, tableRadius, mobile }: { id: RoomId; tableRadius: number; mobile: boolean }) {
   const Room = ROOMS[id].component;
   return <Room tableRadius={tableRadius} mobile={mobile} />;
@@ -373,7 +426,7 @@ function CameraRig({ layout, look, invalidateRef }: { layout: Layout; look: RefO
     // development only: tests can park the camera anywhere in the room
     if ((window as unknown as { __freeCam?: boolean }).__freeCam) return;
     const L = look.current;
-    if (!L.dragging) {
+    if (!L.dragging && !L.follow) {
       // the head turns back to the table by itself
       const k = 1 - Math.exp(-dt * 3);
       L.yaw -= L.yaw * k;
@@ -382,7 +435,8 @@ function CameraRig({ layout, look, invalidateRef }: { layout: Layout; look: RefO
       if (Math.abs(L.pitch) < 1e-4) L.pitch = 0;
     }
     const c = cur.current;
-    const k2 = 1 - Math.exp(-dt * 14);
+    // following the mouse is a slow, steady head turn; a drag follows the finger closely
+    const k2 = 1 - Math.exp(-dt * (L.follow ? 3.5 : 14));
     c.yaw += (L.yaw - c.yaw) * k2;
     c.pitch += (L.pitch - c.pitch) * k2;
     if (Math.abs(c.yaw - L.yaw) < 1e-4) c.yaw = L.yaw;

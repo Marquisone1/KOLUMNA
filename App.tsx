@@ -46,6 +46,14 @@ export default function App() {
   const [mode, setModeState] = useState<ViewMode>(initialViewMode);
   const [notice, setNotice] = useState<string | null>(null);
   const setMode = useCallback((m: ViewMode) => { setModeState(m); saveViewMode(m); }, []);
+  // load the 3D table in the background while people are still on the start screen or in the lobby
+  useEffect(() => {
+    if (!webgl || mode !== '3d') return;
+    const start = () => { import('./components/three/preload').then((m) => m.preload3d()); };
+    const ric = (window as unknown as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;
+    if (ric) ric(start);
+    else setTimeout(start, 800);
+  }, [webgl, mode]);
   const on3dError = useCallback(() => {
     setModeState('2d');
     setNotice(t('view3dFailed'));

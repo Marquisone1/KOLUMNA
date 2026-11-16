@@ -82,8 +82,9 @@ export default function Bar({ mobile, tableRadius }: RoomProps) {
       {/* the room itself stays dim: only a faint bounce from the warm walls */}
       <hemisphereLight args={['#ffe6c4', '#2a1a10', 0.06]} />
       {/* pendants over the counter: lit shades, one soft light on the counter top */}
-      {[-14, 0, 14].map((x, i) => (
-        <Pendant key={x} x={x} z={COUNTER_Z - 2} y={14.5} mats={mats} light={i === 1} />
+      {/* left and right of the sign, so none hangs in front of it */}
+      {[-20, -14, 14, 20].map((x, i) => (
+        <Pendant key={x} x={x} z={COUNTER_Z - 2} y={14.5} mats={mats} light={i === 1 || (!mobile && i === 2)} />
       ))}
     </group>
   );
