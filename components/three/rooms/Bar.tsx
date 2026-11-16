@@ -1,11 +1,15 @@
 import { useEffect, useMemo } from 'react';
+import { useFrame, useThree } from '@react-three/fiber';
+import { spawnExtra, type Extra } from '../characters';
 import * as THREE from 'three';
 import { leatherTexture, plankTexture, signTexture, wallpaperTexture, woodTexture } from '../textures';
 import type { RoomProps } from './types';
 
-// A plain neighbourhood bar around the card table: plank floor, wainscoted walls,
-// a long counter with a brass foot rail, a mirrored back bar with lit shelves and bottles,
-// stools, a painted sign, windows onto the night, a dartboard and two empty side tables.
+// A neighbourhood bar around the card table: plank floor and a round rug under the table,
+// wainscoted walls, a long counter with a brass foot rail, a mirrored back bar with lit shelves,
+// a bartender and two regulars at the counter, a chalkboard, a jukebox, windows onto the night.
+// The light comes from the lamp over the card table; the rest of the room is lit indirectly:
+// the back bar, two wall sconces, the jukebox and the festoon bulbs.
 // Everything is built from primitives and canvas textures. Units: 1 = 10 cm, table top at y = 0.
 
 const FLOOR = -7.4;
@@ -20,7 +24,9 @@ function useDispose(objs: { dispose: () => void }[]) {
   useEffect(() => () => objs.forEach((o) => o.dispose()), [objs]);
 }
 
-export default function Bar({ mobile }: RoomProps) {
+// ---------- room ----------
+
+export default function Bar({ mobile, tableRadius }: RoomProps) {
   const tex = useMemo(() => {
     const floor = plankTexture();
     const wall = wallpaperTexture('#1f5562');
@@ -68,11 +74,15 @@ export default function Bar({ mobile }: RoomProps) {
       <Bunting />
       <Plants />
       <Posters />
-      {/* fill light for the room so it reads warm and open, not a dark cave */}
-      <hemisphereLight args={['#fff1dc', '#5a3a22', 0.45]} />
-      {/* pendants over the counter */}
+      <Rug radius={tableRadius + 7} />
+      <Chalkboard />
+      <Jukebox mobile={mobile} mats={mats} />
+      <People mobile={mobile} />
+      {/* the room itself stays dim: only a faint bounce from the warm walls */}
+      <hemisphereLight args={['#ffe6c4', '#2a1a10', 0.06]} />
+      {/* pendants over the counter: lit shades, one soft light on the counter top */}
       {[-14, 0, 14].map((x, i) => (
-        <Pendant key={x} x={x} z={COUNTER_Z - 2} y={14.5} mats={mats} light={!mobile || i === 1} />
+        <Pendant key={x} x={x} z={COUNTER_Z - 2} y={14.5} mats={mats} light={i === 1} />
       ))}
     </group>
   );
@@ -246,7 +256,8 @@ function BackBar({ mats, mobile }: { mats: Mats; mobile: boolean }) {
         </group>
       ))}
       <primitive object={bottles} />
-      <pointLight position={[0, 9, z + 5]} intensity={mobile ? 45 : 60} distance={40} decay={1.5} color="#ffd59a" />
+      {/* indirect: the lit shelves wash the mirror and the wall behind the bar */}
+      <pointLight position={[0, 8, z + 3]} intensity={mobile ? 22 : 28} distance={26} decay={1.6} color="#ffcf8a" />
       {/* the sign */}
       <mesh position={[0, 17.4, z + 0.6]} material={mats.sign}>
         <boxGeometry args={[22, 5.5, 0.5]} />
@@ -291,7 +302,7 @@ function Pendant({ x, y, z, mats, light }: { x: number; y: number; z: number; ma
       <mesh position={[0, 0.35, 0]} material={mats.bulb}>
         <sphereGeometry args={[0.32, 16, 10]} />
       </mesh>
-      {light && <pointLight position={[0, -0.4, 0]} intensity={45} distance={32} decay={1.5} color="#ffd9a6" />}
+      {light && <pointLight position={[0, -0.4, 0]} intensity={16} distance={22} decay={1.6} color="#ffd9a6" />}
     </group>
   );
 }
@@ -369,10 +380,12 @@ function SideWalls({ mats }: { mats: Mats }) {
       {[-1, 1].map((side) => (
         <group key={side} position={[side * (SIDE_X - 0.3), 0, 0]} rotation-y={-side * Math.PI / 2}>
           {/* sconces */}
-          {[-6, 18].map((zz) => (
+          {[-6, 18].map((zz, k) => (
             <group key={zz} position={[zz * side, 11, 0.6]}>
               <Box size={[0.6, 1.2, 0.4]} pos={[0, 0, 0]} mat={mats.brass} />
               <mesh position={[0, 0.9, 0.5]} material={mats.bulb}><sphereGeometry args={[0.38, 12, 8]} /></mesh>
+              {/* a small up-light: a pool of warm light on the wall, not on the table */}
+              {k === 0 && <pointLight position={[0, 1.6, 1.4]} intensity={9} distance={13} decay={1.7} color="#ffcf96" />}
             </group>
           ))}
         </group>
@@ -572,6 +585,172 @@ function Posters() {
         <mesh key={i} position={s.pos} rotation-y={s.rot} material={mats[i]}>
           <planeGeometry args={[6, 8.4]} />
         </mesh>
+      ))}
+    </group>
+  );
+}
+
+/** A round wool rug under the card table: it gives the table its place in the room */
+function Rug({ radius }: { radius: number }) {
+  const mat = useMemo(() => {
+    const S = 512;
+    const c = document.createElement('canvas');
+    c.width = c.height = S;
+    const ctx = c.getContext('2d')!;
+    const rings = ['#7a2f24', '#c9a063', '#7a2f24', '#2f4f77', '#7a2f24', '#e0c48a', '#5a2219'];
+    rings.forEach((col, i) => {
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.arc(S / 2, S / 2, S / 2 - i * (i < 3 ? 10 : 22), 0, Math.PI * 2);
+      ctx.fill();
+    });
+    // a woven border of small diamonds
+    ctx.fillStyle = '#e0c48a';
+    for (let i = 0; i < 64; i++) {
+      const a = (i / 64) * Math.PI * 2;
+      const r = S / 2 - 15;
+      ctx.save();
+      ctx.translate(S / 2 + Math.cos(a) * r, S / 2 + Math.sin(a) * r);
+      ctx.rotate(a + Math.PI / 4);
+      ctx.fillRect(-3, -3, 6, 6);
+      ctx.restore();
+    }
+    const img = ctx.getImageData(0, 0, S, S);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const n = (Math.random() - 0.5) * 22;
+      img.data[i] += n; img.data[i + 1] += n; img.data[i + 2] += n;
+    }
+    ctx.putImageData(img, 0, 0);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.MeshStandardMaterial({ map: t, roughness: 1, transparent: true, alphaTest: 0.5 });
+  }, []);
+  useEffect(() => () => { mat.map?.dispose(); mat.dispose(); }, [mat]);
+  return (
+    <mesh rotation-x={-Math.PI / 2} position={[0, FLOOR + 0.03, 0]} material={mat} receiveShadow>
+      <circleGeometry args={[radius, 96]} />
+    </mesh>
+  );
+}
+
+/** A chalkboard with tonight's drinks, next to the back bar */
+function Chalkboard() {
+  const mat = useMemo(() => {
+    const c = document.createElement('canvas');
+    c.width = 384;
+    c.height = 512;
+    const ctx = c.getContext('2d')!;
+    ctx.fillStyle = '#1f2623';
+    ctx.fillRect(0, 0, 384, 512);
+    // chalk dust
+    for (let i = 0; i < 1400; i++) {
+      ctx.fillStyle = `rgba(255,255,255,${Math.random() * 0.05})`;
+      ctx.fillRect(Math.random() * 384, Math.random() * 512, 2, 2);
+    }
+    ctx.fillStyle = '#efe9de';
+    ctx.textAlign = 'center';
+    ctx.font = "600 52px 'Fraunces', Georgia, serif";
+    ctx.fillText('Heute', 192, 78);
+    ctx.font = "500 24px 'Instrument Sans', system-ui, sans-serif";
+    ctx.textAlign = 'left';
+    const rows = [['Hausbier', '3,80'], ['Radler', '3,50'], ['Apfelschorle', '2,90'], ['Kolumna-Spritz', '5,50'], ['Kaffee', '2,40']];
+    rows.forEach(([name, price], i) => {
+      const y = 150 + i * 52;
+      ctx.fillStyle = '#efe9de';
+      ctx.fillText(name, 40, y);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#f7cb3a';
+      ctx.fillText(price, 344, y);
+      ctx.textAlign = 'left';
+    });
+    ctx.fillStyle = '#62cbef';
+    ctx.textAlign = 'center';
+    ctx.font = "500 22px 'Instrument Sans', system-ui, sans-serif";
+    ctx.fillText('Freitags Kartenabend', 192, 452);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.MeshStandardMaterial({ map: t, roughness: 0.95 });
+  }, []);
+  const frame = useMemo(() => new THREE.MeshStandardMaterial({ color: '#6b4123', roughness: 0.6 }), []);
+  useEffect(() => () => { mat.map?.dispose(); mat.dispose(); frame.dispose(); }, [mat, frame]);
+  return (
+    <group position={[-33, 6.5, BACK_Z + 0.5]}>
+      <mesh material={frame}><boxGeometry args={[7.6, 10, 0.4]} /></mesh>
+      <mesh position={[0, 0, 0.22]} material={mat}><planeGeometry args={[6.8, 9.2]} /></mesh>
+    </group>
+  );
+}
+
+/** A wooden jukebox in the corner, its front lit from inside */
+function Jukebox({ mobile, mats }: { mobile: boolean; mats: Mats }) {
+  const front = useMemo(() => {
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 384;
+    const ctx = c.getContext('2d')!;
+    const g = ctx.createLinearGradient(0, 0, 0, 384);
+    g.addColorStop(0, '#ffe2a8');
+    g.addColorStop(1, '#f2a94a');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 256, 384);
+    // glass tubes in the card colours
+    TIER.forEach((col, i) => {
+      ctx.fillStyle = col;
+      ctx.fillRect(24 + i * 44, 40, 24, 200);
+    });
+    ctx.fillStyle = 'rgba(40,24,10,0.85)';
+    ctx.fillRect(28, 270, 200, 70);
+    ctx.fillStyle = '#ffe2a8';
+    for (let i = 0; i < 12; i++) ctx.fillRect(40 + (i % 6) * 30, 284 + Math.floor(i / 6) * 28, 18, 12);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.MeshBasicMaterial({ map: t });
+  }, []);
+  useEffect(() => () => { front.map?.dispose(); front.dispose(); }, [front]);
+  return (
+    <group position={[34, FLOOR, BACK_Z + 4]} rotation-y={-0.5}>
+      <Box size={[6, 9, 3.6]} pos={[0, 4.5, 0]} mat={mats.wood} shadow />
+      <mesh position={[0, 9, 0]} rotation-z={Math.PI / 2} material={mats.wood}>
+        <cylinderGeometry args={[3, 3, 3.6, 32, 1, false, 0, Math.PI]} />
+      </mesh>
+      <mesh position={[0, 6, 1.82]} material={front}><planeGeometry args={[4.6, 7]} /></mesh>
+      <Box size={[6.2, 0.4, 3.8]} pos={[0, 0.2, 0]} mat={mats.brass} />
+      {!mobile && <pointLight position={[0, 6, 3.5]} intensity={10} distance={14} decay={1.7} color="#ffbf6a" />}
+    </group>
+  );
+}
+
+/** A bartender behind the counter and two regulars on the stools; they go about their evening */
+function People({ mobile }: { mobile: boolean }) {
+  const { invalidate } = useThree();
+  const extras = useMemo<{ e: Extra; pos: [number, number, number]; rot: number; every: number; clips: string[] }[]>(() => {
+    const list = [
+      // the bartender stands on the raised duckboard behind the counter, facing the room
+      { e: spawnExtra('characters/Rogue.glb', 'stand'), pos: [4, FLOOR + 6.6, COUNTER_Z - 9] as [number, number, number], rot: Math.PI, every: 7, clips: ['Interact', 'Use_Item'] },
+      { e: spawnExtra('characters/Knight.glb', 'sit'), pos: [-12, 0.65, COUNTER_Z + 3.2] as [number, number, number], rot: 0.15, every: 11, clips: ['Cheer', 'Interact'] },
+    ];
+    if (!mobile) list.push({ e: spawnExtra('characters/Mage.glb', 'sit'), pos: [12, 0.65, COUNTER_Z + 3.2], rot: -0.2, every: 13, clips: ['Use_Item', 'Interact'] });
+    return list;
+  }, [mobile]);
+  const timers = useMemo(() => extras.map((x, i) => x.every * (0.3 + i * 0.25)), [extras]);
+  useFrame((_, dt) => {
+    const d = Math.min(dt, 0.25);
+    extras.forEach((x, i) => {
+      x.e.update(d);
+      timers[i] -= d;
+      if (timers[i] <= 0) {
+        timers[i] = x.every * (0.7 + Math.random() * 0.6);
+        x.e.gesture(x.clips[Math.floor(Math.random() * x.clips.length)]);
+      }
+    });
+    invalidate();
+  });
+  return (
+    <group>
+      {extras.map((x, i) => (
+        <group key={i} position={x.pos} rotation-y={x.rot}>
+          <primitive object={x.e.group} />
+        </group>
       ))}
     </group>
   );

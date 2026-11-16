@@ -255,9 +255,9 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
           camera={{ fov: layout.camera.fov, near: 0.2, far: 200, position: layout.camera.pos.toArray() as [number, number, number] }}
           onCreated={({ gl, scene }) => {
             gl.toneMapping = THREE.NeutralToneMapping;
-            gl.toneMappingExposure = 1.12;
-            scene.background = new THREE.Color('#1b1410');
-            scene.fog = new THREE.Fog('#1b1410', 60, 150);
+            gl.toneMappingExposure = 1.05;
+            scene.background = new THREE.Color('#120d0a');
+            scene.fog = new THREE.Fog('#120d0a', 55, 140);
             setAnisotropy(gl.capabilities.getMaxAnisotropy());
           }}
           onPointerMissed={onOut}
@@ -494,15 +494,15 @@ function TableAndLamp({ layout, mobile }: { layout: Layout; mobile: boolean }) {
   const shadowSize = mobile ? 1024 : 2048;
   return (
     <group>
-      <hemisphereLight args={['#fff0dc', '#2a1a10', 0.5]} />
+      <hemisphereLight args={['#fff0dc', '#2a1a10', 0.08]} />
       {/* soft fill from behind your shoulder so faces and the card in your hand are not black */}
-      <directionalLight position={[2, 9, r + 14]} intensity={0.55} color="#ffe7c8" />
+      <directionalLight position={[2, 9, r + 14]} intensity={0.16} color="#ffe7c8" />
       {/* the lamp over the table */}
       <spotLight
         position={[0, lampH - 0.6, 0]}
         target={lampTarget}
-        angle={Math.atan((r + 3.5) / lampH)}
-        penumbra={0.55}
+        angle={Math.atan((r + 1.6) / lampH)}
+        penumbra={0.4}
         decay={0}
         intensity={5}
         color="#ffe4bf"
@@ -579,7 +579,7 @@ function Reflections() {
       room.dispose();
       pmrem.dispose();
       scene.environment = env;
-      scene.environmentIntensity = 0.28;
+      scene.environmentIntensity = 0.09;
     }).catch(() => { /* reflections are a nicety */ });
     return () => {
       alive = false;

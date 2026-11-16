@@ -227,7 +227,7 @@ const entries = new Map<string, Entry>();
 let anisotropy = 4;
 
 export function setAnisotropy(a: number) {
-  anisotropy = Math.max(1, Math.min(8, a));
+  anisotropy = Math.max(1, Math.min(16, a));
   entries.forEach((e) => { e.tex.anisotropy = anisotropy; e.tex.needsUpdate = true; });
 }
 

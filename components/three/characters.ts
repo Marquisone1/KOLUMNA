@@ -250,7 +250,7 @@ export class Characters {
       const hipsY = vTmp.y;
       // size by the standing neck height (about 50 cm: small, friendly figures whose big heads
       // still read as heads), then raise them on a chair until the neck is near your eye height
-      s = standNeck > 0 ? 5.0 / standNeck : 5.8 / Math.max(0.01, headY - hipsY);
+      s = standNeck > 0 ? 4.3 / standNeck : 5.8 / Math.max(0.01, headY - hipsY);
       wrap.position.y = EYE_Y - 1.8 - headY * s;
       seatTop = hipsY * s + wrap.position.y - 0.25 * s;
       wrap.position.x = -vTmp.x * s;
@@ -412,4 +412,88 @@ export class Characters {
     if (!f) return null;
     return out.set(f.root.position.x, f.top, f.root.position.z);
   }
+}
+
+// ---------- extras: people in the room who are not playing ----------
+
+export interface Extra {
+  group: THREE.Group;
+  update(dt: number): void;
+  /** play a short upper-body gesture, e.g. a bartender wiping the counter */
+  gesture(clip: string): void;
+}
+
+/**
+ * A character standing (feet at the group's origin) or seated (hips at the group's origin),
+ * facing the group's −Z, at the same size as the players. Loads in the background.
+ */
+export function spawnExtra(path: string, mode: 'stand' | 'sit'): Extra {
+  const group = new THREE.Group();
+  let mixer: THREE.AnimationMixer | null = null;
+  const gestures = new Map<string, THREE.AnimationAction>();
+  let base: THREE.AnimationAction | null = null;
+  let current: THREE.AnimationAction | null = null;
+  Promise.all([loadModel(path), loadTools()]).then(([model, t]) => {
+    const scene = t.clone(model.scene);
+    const turn = new THREE.Group();
+    turn.rotation.y = Math.PI;
+    turn.add(scene);
+    scene.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.frustumCulled = false; } });
+    const bone = (n: string) => scene.getObjectByName(n) ?? scene.getObjectByName(n.replace(/\./g, ''));
+    turn.updateMatrixWorld(true);
+    const head = bone('head');
+    const feet = ['foot.l', 'foot.r'].map(bone).filter(Boolean) as THREE.Object3D[];
+    const footY = feet.length ? Math.min(...feet.map((f) => f.getWorldPosition(new THREE.Vector3()).y)) : 0;
+    const neck = head ? head.getWorldPosition(new THREE.Vector3()).y - footY : 1;
+    const s = 4.3 / Math.max(0.01, neck);
+    mixer = new THREE.AnimationMixer(scene);
+    const clipName = mode === 'stand' ? 'Idle' : SEATED_CLIP;
+    const clip = model.animations.find((c) => c.name === clipName);
+    if (clip) {
+      if (mode === 'sit') {
+        mixer.clipAction(filterClip(clip, (b) => !UPPER_BODY.test(b), 'x-lower')).play();
+        base = mixer.clipAction(filterClip(clip, (b) => UPPER_BODY.test(b), 'x-upper'));
+      } else {
+        base = mixer.clipAction(clip);
+      }
+      base.play();
+      mixer.setTime(Math.random() * clip.duration);
+    }
+    for (const c of model.animations) {
+      if (c.name === clipName) continue;
+      const a = mixer.clipAction(mode === 'sit' ? filterClip(c, (b) => UPPER_BODY.test(b), 'x-' + c.name) : c);
+      a.setLoop(THREE.LoopOnce, 1);
+      gestures.set(c.name, a);
+    }
+    mixer.addEventListener('finished', (e) => {
+      if (e.action !== current) return;
+      current.fadeOut(0.4);
+      base?.reset().fadeIn(0.4).play();
+      current = null;
+    });
+    mixer.update(0);
+    turn.updateMatrixWorld(true);
+    const wrap = new THREE.Group();
+    wrap.add(turn);
+    wrap.scale.setScalar(s);
+    if (mode === 'stand') {
+      wrap.position.y = -footY * s;
+    } else {
+      const hips = bone('hips');
+      const hp = hips ? hips.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3();
+      wrap.position.set(-hp.x * s, -hp.y * s + 0.25 * s, -hp.z * s);
+    }
+    group.add(wrap);
+  }).catch((e) => console.warn('Kolumna: extra character not used', path, e));
+  return {
+    group,
+    update(dt) { mixer?.update(dt); },
+    gesture(name) {
+      const a = gestures.get(name);
+      if (!a || current) return;
+      base?.fadeOut(0.3);
+      a.reset().fadeIn(0.3).play();
+      current = a;
+    },
+  };
 }

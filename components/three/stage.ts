@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { GameState } from '../../game/types';
 import { SEAT_COLORS } from '../PlayerBoard';
 import { backTexture, CARD_H, CARD_W, frontTexture, leatherTexture, woodTexture } from './textures';
-import { CARD_T, GRID_D, GRID_W, opponentHandPose, slotPose, type Layout, type Pose } from './layout';
+import { CARD_T, GRID_D, GRID_W, PILE_SCALE, opponentHandPose, slotPose, type Layout, type Pose } from './layout';
 
 // The card scene. Every card on the table is one object keyed by its id.
 // `sync` derives where each card belongs from the game state; a card whose place changed
@@ -17,7 +17,7 @@ const WHITE = new THREE.Color('#efe9de');
 const DISCARD_SHOWN = 6;
 /** Height of the turntable's top above the felt */
 export const TT_H = 0.17;
-const TT_R = 1.5;
+const TT_R = 1.95;
 const EASE = (t: number) => 1 - Math.pow(1 - t, 3);
 const EASE_IO = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const CARD_THICK = 0.0062;
@@ -383,6 +383,8 @@ export class TableStage {
   setLayout(layout: Layout, players: GameState['players']) {
     this.layout = layout;
     this.deckMesh.position.set(layout.deck.x, TT_H, layout.deck.z);
+    this.deckMesh.scale.x = this.deckMesh.scale.z = PILE_SCALE;
+    for (const m of [this.deckRing, this.discardMark, this.discardRing]) m.scale.setScalar(PILE_SCALE);
     this.deckRing.position.set(layout.deck.x, TT_H + 0.0015, layout.deck.z);
     this.discardMark.position.set(layout.discard.x, TT_H + 0.0008, layout.discard.z);
     this.discardRing.position.set(layout.discard.x, TT_H + 0.0015, layout.discard.z);
@@ -439,14 +441,14 @@ export class TableStage {
   deckTop(): Pose {
     const L = this.layout!;
     const p = this.onTurntable(L.deck.x, L.deck.z);
-    return { x: p.x, y: TT_H + this.deckHeight + CARD_T, z: p.z, yaw: this.ttAngle, tilt: 0, flip: Math.PI, s: 1 };
+    return { x: p.x, y: TT_H + this.deckHeight + CARD_T, z: p.z, yaw: this.ttAngle, tilt: 0, flip: Math.PI, s: PILE_SCALE };
   }
 
   discardPose(i: number, id: number, angle = this.ttAngle): Pose {
     const L = this.layout!;
     const j = hash(id);
     const p = this.onTurntable(L.discard.x + (j - 0.5) * 0.05, L.discard.z + (hash(id + 7) - 0.5) * 0.05, angle);
-    return { x: p.x, y: TT_H + CARD_T * (i + 1), z: p.z, yaw: angle + (j - 0.5) * 0.22, tilt: 0, flip: 0, s: 1 };
+    return { x: p.x, y: TT_H + CARD_T * (i + 1), z: p.z, yaw: angle + (j - 0.5) * 0.22, tilt: 0, flip: 0, s: PILE_SCALE };
   }
 
   /** Where every card shown on the table belongs in this state */

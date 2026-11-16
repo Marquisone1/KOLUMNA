@@ -55,32 +55,49 @@ export interface Layout {
   portrait: boolean;
 }
 
-/** Rotate a seat-local offset into world space (local +Z points away from the table centre) */
+/** Rotate a seat-local offset into world space (local +Z points away from the table centre); offsets scale with the seat */
 export function seatPoint(seat: Seat, lx: number, lz: number) {
+  return seatPointRaw(seat, lx * seat.s, lz * seat.s);
+}
+
+/** Same, without the seat's scale: for distances that belong to the room, not the cards */
+export function seatPointRaw(seat: Seat, x: number, z: number) {
   const c = Math.cos(seat.yaw);
   const s = Math.sin(seat.yaw);
-  const x = lx * seat.s;
-  const z = lz * seat.s;
   return { x: seat.x + c * x + s * z, z: seat.z - s * x + c * z };
 }
+
+/** From a seat's grid centre to the table edge in front of its player */
+export function edgeOf(seat: Seat) {
+  return (GRID_D / 2) * seat.s + 1.05;
+}
+
+/**
+ * Opponents' cards are drawn larger than yours: from across a big table at the same size
+ * they would be hard to read, and reading them is the game. The piles in the middle too.
+ */
+export const OPPONENT_SCALE = 1.35;
+/** Deck and discard pile on the turntable */
+export const PILE_SCALE = 1.35;
 
 /** Where a grid card sits: column c of `cols`, row r (0 = far row, toward the centre) */
 export function slotPose(seat: Seat, cols: number, c: number, r: number, up: boolean): Pose {
   const lx = (c - (cols - 1) / 2) * PITCH_X;
   const lz = (r - 1) * PITCH_Z;
   const p = seatPoint(seat, lx, lz);
+  // cards lie the way their owner reads them, as on a real table
   return { x: p.x, y: CARD_T, z: p.z, yaw: seat.yaw, tilt: 0, flip: up ? 0 : Math.PI, s: seat.s };
 }
 
 /** The card an opponent holds: up in their hands above the table edge, face toward them */
 export function opponentHandPose(seat: Seat, up: boolean): Pose {
-  const p = seatPoint(seat, 0.35, EDGE + 0.2);
-  return { x: p.x, y: 2.1, z: p.z, yaw: seat.yaw, tilt: 1.15, flip: up ? 0 : Math.PI, s: 1 };
+  const p = seatPointRaw(seat, 0.45, edgeOf(seat) + 0.2);
+  return { x: p.x, y: 2.1, z: p.z, yaw: seat.yaw, tilt: 1.15, flip: up ? 0 : Math.PI, s: seat.s };
 }
 
 /** Where a seat's player sits, at table-top height */
 export function sitterPoint(seat: Seat) {
-  const p = seatPoint(seat, 0, SITTER);
+  const p = seatPointRaw(seat, 0, edgeOf(seat) + 1.6);
   return new THREE.Vector3(p.x, 0, p.z);
 }
 
@@ -100,16 +117,16 @@ export function computeLayout(n: number, meIdx: number, aspect: number, hudTop: 
 
   // Grids sit on a circle. Grow it until neither grids nor the people behind them crowd each other.
   let R = m <= 1 ? 5.2 : 6.2;
-  const seatAt = (a: number, r: number): Seat => ({ x: -Math.sin(a) * r, z: Math.cos(a) * r, yaw: -a, s: 1, angle: a });
+  const seatAt = (a: number, r: number): Seat => ({ x: -Math.sin(a) * r, z: Math.cos(a) * r, yaw: -a, s: a === 0 ? 1 : OPPONENT_SCALE, angle: a });
   for (; R < 14; R += 0.1) {
     const all = [0, ...angles].map((a) => seatAt(a, R));
     let ok = true;
     for (let i = 0; i < all.length && ok; i++) {
       for (let j = i + 1; j < all.length && ok; j++) {
-        if (Math.hypot(all[i].x - all[j].x, all[i].z - all[j].z) < 4.3) ok = false;
+        if (Math.hypot(all[i].x - all[j].x, all[i].z - all[j].z) < 2.15 * (all[i].s + all[j].s)) ok = false;
         if (sitterPoint(all[i]).distanceTo(sitterPoint(all[j])) < 7.2) ok = false;
       }
-      if (Math.hypot(all[i].x, all[i].z) < 3.4) ok = false;
+      if (Math.hypot(all[i].x, all[i].z) < 2.0 + 1.55 * all[i].s + 0.8) ok = false;
     }
     if (ok) break;
   }
@@ -119,8 +136,8 @@ export function computeLayout(n: number, meIdx: number, aspect: number, hudTop: 
   angles.forEach((a, i) => { seats[(me + 1 + i) % n] = seatAt(a, R); });
 
   // deck and discard sit side by side on the turntable in the middle (its own frame)
-  const deck = { x: -0.45, z: 0 };
-  const discard = { x: 0.45, z: 0 };
+  const deck = { x: -0.6, z: 0 };
+  const discard = { x: 0.6, z: 0 };
   // the button that rises out of the table, to your right
   const toss = portrait ? { x: 0, z: R + GRID_D / 2 + 0.75 } : { x: GRID_W / 2 + 1.0, z: R + 0.2 };
 
@@ -132,7 +149,7 @@ export function computeLayout(n: number, meIdx: number, aspect: number, hudTop: 
   const toEye = eye.clone().sub(hp);
   const handMine: Pose = { x: hp.x, y: hp.y, z: hp.z, yaw: 0, tilt: Math.atan2(toEye.z, toEye.y), flip: 0, s: 1.05 };
 
-  const table = { r: R + EDGE };
+  const table = { r: R + Math.max(...seats.filter(Boolean).map(edgeOf)) };
 
   // What the eyes should take in, most important first
   const must: THREE.Vector3[] = [];
@@ -149,11 +166,11 @@ export function computeLayout(n: number, meIdx: number, aspect: number, hudTop: 
     // faces in front of you; those beside you are seen by turning your head (drag)
     if (i !== me) {
       const h = sitterPoint(seat).setY(EYE_Y + 1.5);
-      const ang = Math.abs(Math.atan2(h.x, R + SITTER + 0.4 - h.z));
+      const ang = Math.abs(Math.atan2(h.x, sit.z + 0.4 - h.z));
       if (ang < (portrait ? 0.32 : 0.62)) heads.push(h);
     }
   });
-  must.push(new THREE.Vector3(-1.5, 0, 0), new THREE.Vector3(1.5, 0, 0));
+  must.push(new THREE.Vector3(-2, 0, 0), new THREE.Vector3(2, 0, 0));
   must.push(new THREE.Vector3(toss.x + 0.5, 0, toss.z + 0.3));
   const camera = fitEyes(eye, [[...must, ...grids, ...heads], [...must, ...grids], must], aspect, hudTop, hudBottom, portrait ? 84 : 70);
   return { seats, deck, discard, toss, handMine, table, eye, camera, portrait };
