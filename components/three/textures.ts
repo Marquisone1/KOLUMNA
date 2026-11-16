@@ -9,18 +9,19 @@ export const CARD_H = 0.882;
 
 const TEX_W = 400;
 const TEX_H = 560;
-const PAPER = '#f4ede0';
+const PAPER = '#fbf7ee';
 
+// one bright ink per value tier: dark blue below zero, sky at zero, then green, yellow, red
 const INK = {
-  neg: { ink: '#2f4c5a', deep: '#22394a', num: '#f3ecdc', rule: 'rgba(255,255,255,0.32)' },
-  zero: { ink: '#e2d4b6', deep: '#cfbf9c', num: '#2a2622', rule: 'rgba(42,38,34,0.28)' },
-  low: { ink: '#5d8a5e', deep: '#46704a', num: '#f8f3e7', rule: 'rgba(255,255,255,0.32)' },
-  mid: { ink: '#d6a043', deep: '#bf8630', num: '#2b2014', rule: 'rgba(43,32,20,0.3)' },
-  high: { ink: '#b5482f', deep: '#943722', num: '#fcefe2', rule: 'rgba(255,255,255,0.32)' },
+  neg: { ink: '#3560c4', deep: '#26479a', num: '#ffffff', rule: 'rgba(255,255,255,0.4)', dark: false },
+  zero: { ink: '#62cbef', deep: '#3fb0db', num: '#0d2b3e', rule: 'rgba(13,43,62,0.3)', dark: true },
+  low: { ink: '#47ad61', deep: '#348d4b', num: '#ffffff', rule: 'rgba(255,255,255,0.4)', dark: false },
+  mid: { ink: '#f7cb3a', deep: '#eaae1c', num: '#3b2a05', rule: 'rgba(59,42,5,0.3)', dark: true },
+  high: { ink: '#e74c35', deep: '#c63622', num: '#ffffff', rule: 'rgba(255,255,255,0.4)', dark: false },
 };
-const BACK = '#2b231d';
-const BACK_DEEP = '#1f1915';
-const ACCENT = '227,163,74';
+const BACK = '#2a3d7a';
+const BACK_DEEP = '#1c2a59';
+const ACCENT = '247,203,58';
 
 function tierOf(v: number) {
   if (v < 0) return INK.neg;
@@ -92,7 +93,7 @@ function drawFront(ctx: CanvasRenderingContext2D, v: number) {
   ctx.fillStyle = g;
   ctx.fillRect(px, py, pw, ph);
   // fine diagonal print screen
-  ctx.strokeStyle = 'rgba(255,255,255,0.045)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
   ctx.lineWidth = 1.2;
   ctx.beginPath();
   for (let d = -H; d < W + H; d += 7) {
@@ -147,7 +148,7 @@ function drawFront(ctx: CanvasRenderingContext2D, v: number) {
     const cx = px + W * 0.11;
     ctx.fillText(label, cx, py + W * 0.06);
     ctx.globalAlpha = 1;
-    mark(ctx, cx, py + W * 0.27, W * 0.05, (a) => (t === INK.zero || t === INK.mid ? `rgba(43,32,20,${a * 0.7})` : `rgba(255,248,236,${a * 0.75})`));
+    mark(ctx, cx, py + W * 0.27, W * 0.05, (a) => (t.dark ? `rgba(20,24,30,${a * 0.6})` : `rgba(255,255,255,${a * 0.8})`));
     ctx.restore();
   };
   corner(false);
@@ -309,7 +310,7 @@ function noise(ctx: CanvasRenderingContext2D, w: number, h: number, amount: numb
 export function feltTexture(): THREE.Texture {
   const S = 1024;
   const [c, ctx] = canvas(S, S);
-  ctx.fillStyle = '#1f3a2e';
+  ctx.fillStyle = '#1d6b49';
   ctx.fillRect(0, 0, S, S);
   noise(ctx, S, S, 10);
   ctx.globalAlpha = 0.04;
@@ -327,7 +328,7 @@ export function feltTexture(): THREE.Texture {
   ctx.globalAlpha = 1;
   const g = ctx.createRadialGradient(S / 2, S / 2, S * 0.2, S / 2, S / 2, S * 0.5);
   g.addColorStop(0, 'rgba(0,0,0,0)');
-  g.addColorStop(1, 'rgba(0,0,0,0.28)');
+  g.addColorStop(1, 'rgba(0,0,0,0.22)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, S, S);
   return toTexture(c);

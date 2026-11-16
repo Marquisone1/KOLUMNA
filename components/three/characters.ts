@@ -1,15 +1,16 @@
 import * as THREE from 'three';
-import type { GameState } from '../../game/types';
+import type { GameEvent, GameState } from '../../game/types';
 import { SEAT_COLORS } from '../PlayerBoard';
 import { EYE_Y, opponentHandPose, seatPoint, sitterPoint, type Layout, type Seat } from './layout';
-import { CHARACTER_MODELS, CHARACTER_HEIGHT } from './characterModels';
+import { CHARACTER_HEIGHT, CHARACTER_MODELS, REACTION_CLIPS, SEATED_CLIP, UPPER_BODY } from './characterModels';
 
-// The people at the table. Until real models are uploaded, each one is a placeholder:
-// a chair and a seated clay figure in the seat colour. Heads turn to wherever the game is:
-// the player whose turn it is, a card in hand, their own grid.
+// The people at the table. Each opponent sits on a chair at their seat as an animated character
+// (see characterModels.ts). While the model loads, or if it cannot load, a simple clay figure
+// in the seat colour sits there instead. Heads turn to wherever the game is, and the figures
+// react to what happens to them: picking up a card, swapping, cheering at a cleared column.
 
-const CLAY = '#cdb9a2';
-const WOOD = '#4a2f1f';
+const FLOOR = -7.4;
+const WOOD = '#6b4123';
 
 function mat(color: string, rough = 0.85) {
   return new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0 });
@@ -25,33 +26,16 @@ function limb(from: THREE.Vector3, to: THREE.Vector3, r: number, m: THREE.Materi
   return mesh;
 }
 
-interface Figure {
-  root: THREE.Group;
-  body: THREE.Group;
-  head: THREE.Object3D;
-  /** current and goal head turn (yaw, pitch) and body lean */
-  yaw: number; pitch: number; lean: number;
-  goalYaw: number; goalPitch: number; goalLean: number;
-  seat: Seat;
-  playerId: string;
-  modelUrl?: string;
-}
-
 /** A seated placeholder, built facing −Z (toward the table) with its origin at table-top height */
 function placeholder(color: string): { body: THREE.Group; head: THREE.Object3D } {
   const body = new THREE.Group();
   const cloth = mat(color, 0.9);
-  const clay = mat(CLAY, 0.7);
-  // torso: a soft, slightly flattened capsule from the seat to the shoulders
+  const clay = mat('#e8cdb0', 0.7);
   const torso = new THREE.Mesh(new THREE.CapsuleGeometry(1.45, 2.6, 6, 16), cloth);
   torso.scale.set(1.2, 1, 0.78);
   torso.position.set(0, 0.35, 0);
   torso.castShadow = true;
   body.add(torso);
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 0.8, 12), clay);
-  neck.position.set(0, 3.25, 0);
-  body.add(neck);
-  // head pivots at the neck so nodding looks right
   const head = new THREE.Group();
   head.position.set(0, 3.55, 0);
   const skull = new THREE.Mesh(new THREE.SphereGeometry(1.0, 24, 18), clay);
@@ -59,72 +43,114 @@ function placeholder(color: string): { body: THREE.Group; head: THREE.Object3D }
   skull.position.set(0, 0.95, 0);
   skull.castShadow = true;
   head.add(skull);
-  // a nose so you can tell where they look
-  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), clay);
-  nose.scale.set(1, 1.2, 1.4);
-  nose.position.set(0, 0.85, -0.98);
-  head.add(nose);
   body.add(head);
-  // arms: shoulder → elbow → hands resting on the table edge
   for (const side of [-1, 1]) {
     const shoulder = new THREE.Vector3(side * 1.75, 2.55, 0.05);
     const elbow = new THREE.Vector3(side * 2.0, 0.7, -0.75);
     const hand = new THREE.Vector3(side * 1.35, 0.4, -1.75);
     body.add(limb(shoulder, elbow, 0.42, cloth));
     body.add(limb(elbow, hand, 0.36, cloth));
-    const palm = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 10), clay);
-    palm.scale.set(1, 0.6, 1.25);
-    palm.position.copy(hand);
-    palm.castShadow = true;
-    body.add(palm);
   }
   return { body, head };
 }
 
-function chair(): THREE.Group {
+/** A bar chair whose seat top sits at `seatTop`, legs down to the floor, cushion in the seat colour */
+function chair(seatTop: number, color: string): THREE.Group {
   const g = new THREE.Group();
-  const wood = mat(WOOD, 0.6);
+  const wood = mat(WOOD, 0.55);
+  const cushion = mat(color, 0.8);
   const seat = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.35, 4.0), wood);
-  seat.position.set(0, -2.85, 0.5);
+  seat.position.set(0, seatTop - 0.35, 0.5);
+  const pad = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.3, 3.6), cushion);
+  pad.position.set(0, seatTop - 0.05, 0.5);
   const back = new THREE.Mesh(new THREE.BoxGeometry(4.2, 4.6, 0.3), wood);
-  back.position.set(0, -0.6, 2.4);
+  back.position.set(0, seatTop + 2.0, 2.45);
   back.rotation.x = -0.08;
-  g.add(seat, back);
+  g.add(seat, pad, back);
+  const legH = seatTop - 0.5 - FLOOR;
   for (const [x, z] of [[-1.85, -1.3], [1.85, -1.3], [-1.85, 2.3], [1.85, 2.3]]) {
-    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.3, 4.6, 0.3), wood);
-    leg.position.set(x, -5.2, z);
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.3, legH, 0.3), wood);
+    leg.position.set(x, FLOOR + legH / 2, z);
     g.add(leg);
   }
   g.traverse((o) => { if ((o as THREE.Mesh).isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   return g;
 }
 
-let gltfLoader: Promise<{ load: (url: string) => Promise<THREE.Object3D> }> | null = null;
-function loader() {
-  if (!gltfLoader) {
-    gltfLoader = import('three/examples/jsm/loaders/GLTFLoader.js').then(({ GLTFLoader }) => {
+// ---------- loading ----------
+
+interface Loaded { scene: THREE.Object3D; animations: THREE.AnimationClip[] }
+const cache = new Map<string, Promise<Loaded>>();
+let tools: Promise<{ load: (url: string) => Promise<Loaded>; clone: (o: THREE.Object3D) => THREE.Object3D }> | null = null;
+
+function loadTools() {
+  if (!tools) {
+    tools = Promise.all([
+      import('three/examples/jsm/loaders/GLTFLoader.js'),
+      import('three/examples/jsm/utils/SkeletonUtils.js'),
+    ]).then(([{ GLTFLoader }, SkeletonUtils]) => {
       const l = new GLTFLoader();
-      return { load: (url: string) => l.loadAsync(url).then((g) => g.scene) };
+      return { load: (url: string) => l.loadAsync(url).then((g) => ({ scene: g.scene, animations: g.animations })), clone: (o) => SkeletonUtils.clone(o) };
     });
   }
-  return gltfLoader;
+  return tools;
 }
 
-/** Fit an uploaded model into the seat: scaled to CHARACTER_HEIGHT, feet on the floor, facing the table */
-function fitModel(model: THREE.Object3D) {
-  const box = new THREE.Box3().setFromObject(model);
-  const size = box.getSize(new THREE.Vector3());
-  const s = size.y > 0 ? CHARACTER_HEIGHT / size.y : 1;
-  model.scale.setScalar(s);
-  box.setFromObject(model);
-  // models are expected to face +Z (glTF convention); the table is at −Z
-  model.rotation.y = Math.PI;
-  model.position.set(-(box.min.x + box.max.x) / 2, -7.4 - box.min.y, 0);
-  model.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
-  let head: THREE.Object3D | null = null;
-  model.traverse((o) => { if (!head && /head/i.test(o.name)) head = o; });
-  return head as THREE.Object3D | null;
+/** Try the path as given, then under public/ (hosts that serve the source tree) */
+function loadModel(path: string): Promise<Loaded> {
+  let p = cache.get(path);
+  if (!p) {
+    const base = typeof document !== 'undefined' ? document.baseURI : '/';
+    const urls = /^(https?:)?\//.test(path) ? [path] : [new URL(path, base).href, new URL('public/' + path, base).href];
+    p = loadTools().then(async (t) => {
+      let err: unknown;
+      for (const u of urls) {
+        try { return await t.load(u); } catch (e) { err = e; }
+      }
+      throw err;
+    });
+    cache.set(path, p);
+  }
+  return p;
 }
+
+/** Keep only tracks of the given bones, so a standing gesture can play on a seated body */
+function filterClip(clip: THREE.AnimationClip, keep: (bone: string) => boolean, name: string) {
+  const tracks = clip.tracks.filter((t) => keep(t.name.split('.')[0]));
+  return new THREE.AnimationClip(name, clip.duration, tracks);
+}
+
+// ---------- figures ----------
+
+type Reaction = keyof typeof REACTION_CLIPS;
+
+interface Rig {
+  mixer: THREE.AnimationMixer;
+  sitUpper: THREE.AnimationAction | null;
+  reactions: Partial<Record<Reaction, THREE.AnimationAction>>;
+  current: THREE.AnimationAction | null;
+}
+
+interface Figure {
+  root: THREE.Group;
+  body: THREE.Object3D;
+  head: THREE.Object3D;
+  /** placeholders turn their head group directly; models get the turn added on top of the animation */
+  additive: boolean;
+  rig: Rig | null;
+  yaw: number; pitch: number; lean: number;
+  goalYaw: number; goalPitch: number; goalLean: number;
+  seat: Seat;
+  playerId: string;
+  /** height above the table for the name plate */
+  top: number;
+}
+
+const qLook = new THREE.Quaternion();
+const qRoot = new THREE.Quaternion();
+const qParent = new THREE.Quaternion();
+const eLook = new THREE.Euler();
+const vTmp = new THREE.Vector3();
 
 export class Characters {
   root = new THREE.Group();
@@ -133,43 +159,124 @@ export class Characters {
 
   /** One figure per opponent; you are the camera */
   setSeats(layout: Layout, players: GameState['players'], me: string) {
+    this.figures.forEach((f) => f.rig?.mixer.stopAllAction());
     this.root.clear();
     this.figures.clear();
+    let k = 0;
     players.forEach((p, i) => {
       const seat = layout.seats[i];
       if (!seat || p.id === me) return;
+      const color = SEAT_COLORS[p.seat % 6];
       const root = new THREE.Group();
       const sp = sitterPoint(seat);
       root.position.set(sp.x, 0, sp.z);
       root.rotation.y = seat.yaw;
-      root.add(chair());
-      const color = SEAT_COLORS[p.seat % 6];
+      const seatChair = chair(-2.7, color);
+      root.add(seatChair);
       const ph = placeholder(color);
-      const body = ph.body;
-      root.add(body);
-      const fig: Figure = { root, body, head: ph.head, yaw: 0, pitch: 0, lean: 0, goalYaw: 0, goalPitch: 0, goalLean: 0, seat, playerId: p.id };
-      const url = CHARACTER_MODELS[p.seat % CHARACTER_MODELS.length];
-      if (url) {
-        fig.modelUrl = url;
-        loader()
-          .then((l) => l.load(url))
-          .then((model) => {
-            if (this.figures.get(p.id) !== fig) return;
-            const head = fitModel(model);
-            root.remove(body);
-            const wrap = new THREE.Group();
-            wrap.add(model);
-            root.add(wrap);
-            fig.body = wrap;
-            fig.head = head ?? new THREE.Object3D();
-            this.invalidate();
-          })
-          .catch(() => { /* keep the placeholder */ });
-      }
+      root.add(ph.body);
+      const fig: Figure = { root, body: ph.body, head: ph.head, additive: false, rig: null, yaw: 0, pitch: 0, lean: 0, goalYaw: 0, goalPitch: 0, goalLean: 0, seat, playerId: p.id, top: EYE_Y + 2.3 };
       this.root.add(root);
       this.figures.set(p.id, fig);
+      const path = CHARACTER_MODELS.length ? CHARACTER_MODELS[k++ % CHARACTER_MODELS.length] : '';
+      if (path) {
+        Promise.all([loadModel(path), loadTools()])
+          .then(([model, t]) => {
+            if (this.figures.get(p.id) !== fig) return;
+            this.useModel(fig, t.clone(model.scene), model.animations, seatChair, color);
+            this.invalidate();
+          })
+          // keep the placeholder, but say why, so a broken model file is easy to spot
+          .catch((e) => console.warn('Kolumna: character model not used', path, e));
+      }
     });
     this.invalidate();
+  }
+
+  /** Seat a loaded model: pose it, scale it to the table, put a chair of the right height under it */
+  private useModel(fig: Figure, scene: THREE.Object3D, clips: THREE.AnimationClip[], oldChair: THREE.Object3D, color: string) {
+    const wrap = new THREE.Group();
+    const turn = new THREE.Group();
+    // models face +Z (glTF); the table is at −Z of the seat
+    turn.rotation.y = Math.PI;
+    turn.add(scene);
+    wrap.add(turn);
+    scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) { m.castShadow = true; m.frustumCulled = false; }
+    });
+    const mixer = new THREE.AnimationMixer(scene);
+    const seated = clips.find((c) => c.name === SEATED_CLIP);
+    const isUpper = (bone: string) => UPPER_BODY.test(bone);
+    let sitUpper: THREE.AnimationAction | null = null;
+    if (seated) {
+      mixer.clipAction(filterClip(seated, (b) => !isUpper(b), 'sit-lower')).play();
+      sitUpper = mixer.clipAction(filterClip(seated, isUpper, 'sit-upper'));
+      sitUpper.play();
+    }
+    const reactions: Rig['reactions'] = {};
+    (Object.keys(REACTION_CLIPS) as Reaction[]).forEach((r) => {
+      const c = clips.find((x) => x.name === REACTION_CLIPS[r]);
+      if (!c) return;
+      const a = mixer.clipAction(filterClip(c, isUpper, 'react-' + r));
+      a.setLoop(THREE.LoopOnce, 1);
+      a.clampWhenFinished = false;
+      reactions[r] = a;
+    });
+    const rig: Rig = { mixer, sitUpper, reactions, current: null };
+    mixer.addEventListener('finished', (e) => {
+      if (e.action !== rig.current) return;
+      rig.current.fadeOut(0.35);
+      rig.sitUpper?.reset().fadeIn(0.35).play();
+      rig.current = null;
+    });
+
+    // three.js drops dots from node names on load ("foot.l" becomes "footl"), so look for both
+    const bone = (name: string) => scene.getObjectByName(name) ?? scene.getObjectByName(name.replace(/\./g, ''));
+    const headBone = bone('head');
+    // standing (bind pose) neck height, at scale 1
+    wrap.updateMatrixWorld(true);
+    const feet = ['foot.l', 'foot.r'].map((n) => bone(n)).filter(Boolean) as THREE.Object3D[];
+    const standNeck = headBone && feet.length ? headBone.getWorldPosition(vTmp).y - Math.min(...feet.map((f) => f.getWorldPosition(new THREE.Vector3()).y)) : 0;
+    // then the seated pose
+    mixer.update(0);
+    wrap.updateMatrixWorld(true);
+    let s: number;
+    let seatTop = -2.7;
+    const hips = bone('hips');
+    if (seated && headBone && hips) {
+      const headY = headBone.getWorldPosition(vTmp).y;
+      hips.getWorldPosition(vTmp);
+      const hipsY = vTmp.y;
+      // size by the standing neck height (about 50 cm: small, friendly figures whose big heads
+      // still read as heads), then raise them on a chair until the neck is near your eye height
+      s = standNeck > 0 ? 5.0 / standNeck : 5.8 / Math.max(0.01, headY - hipsY);
+      wrap.position.y = EYE_Y - 1.8 - headY * s;
+      seatTop = hipsY * s + wrap.position.y - 0.25 * s;
+      wrap.position.x = -vTmp.x * s;
+      wrap.position.z = 0.5 - vTmp.z * s;
+    } else {
+      const box = new THREE.Box3().setFromObject(wrap);
+      s = CHARACTER_HEIGHT / Math.max(0.01, box.max.y - box.min.y);
+      wrap.position.y = FLOOR - box.min.y * s;
+    }
+    wrap.scale.setScalar(s);
+    // everyone breathes at their own pace
+    if (seated) mixer.setTime(Math.random() * seated.duration);
+
+    fig.root.remove(fig.body);
+    fig.root.remove(oldChair);
+    fig.root.add(chair(seatTop, color), wrap);
+    fig.body = wrap;
+    fig.rig = rig;
+    fig.root.updateMatrixWorld(true);
+    if (headBone) {
+      fig.head = headBone;
+      fig.additive = true;
+      fig.top = Math.max(EYE_Y + 1, headBone.getWorldPosition(vTmp).y + 4.4);
+    } else {
+      fig.head = new THREE.Object3D();
+    }
   }
 
   /** Decide where everyone looks for this state */
@@ -190,7 +297,7 @@ export class Characters {
         return;
       }
       if (cur?.id === p.id) {
-        lean = 0.14;
+        lean = 0.12;
         if (view.drawn) {
           const h = opponentHandPose(seat, true);
           target = tmp.set(h.x, h.y, h.z);
@@ -209,9 +316,9 @@ export class Characters {
           target = tmp.set(g.x, 0.5, g.z);
         }
       } else {
-        target = tmp.set(0, 0, 0.4);
+        // between rounds everyone looks at you
+        target = tmp.copy(layout.eye);
       }
-      // turn the world target into head yaw/pitch relative to the seat
       const head = new THREE.Vector3(fig.root.position.x, EYE_Y, fig.root.position.z);
       const d = target.clone().sub(head);
       // a figure faces its local −Z, which points at world yaw = seat.yaw
@@ -224,29 +331,85 @@ export class Characters {
     this.invalidate();
   }
 
+  /** Play a short gesture for whatever just happened */
+  react(ev: GameEvent | null, view: GameState) {
+    if (!ev) return;
+    const play = (pid: string | undefined, r: Reaction) => {
+      const rig = pid ? this.figures.get(pid)?.rig : null;
+      const a = rig?.reactions[r];
+      if (!rig || !a) return;
+      if (rig.current && rig.current !== a) rig.current.fadeOut(0.2);
+      rig.sitUpper?.fadeOut(0.25);
+      a.reset().setEffectiveWeight(1).fadeIn(0.25).play();
+      rig.current = a;
+      this.invalidate();
+    };
+    switch (ev.k) {
+      case 'draw':
+      case 'take': play(ev.p, 'pick'); break;
+      case 'swap': play(ev.p, 'swap'); break;
+      case 'toss': play(ev.p, 'tap'); break;
+      case 'flip': if (view.phase === 'play') play(ev.p, 'tap'); break;
+      case 'clear':
+      case 'finish': play(ev.p, 'cheer'); break;
+      case 'roundEnd': {
+        const r = view.result;
+        if (!r) break;
+        const best = Math.min(...Object.values(r.scores));
+        Object.entries(r.scores).forEach(([pid, sc]) => {
+          if (r.doubled && pid === r.finisher) play(pid, 'wince');
+          else if (sc === best) play(pid, 'cheer');
+        });
+        break;
+      }
+    }
+  }
+
   update(dt: number): boolean {
     let active = false;
     const k = 1 - Math.exp(-dt * 5);
     this.figures.forEach((f) => {
+      if (f.rig) {
+        f.rig.mixer.update(dt);
+        // seated figures breathe, so they need frames while they are on screen
+        active = true;
+      }
       const dy = f.goalYaw - f.yaw;
       const dp = f.goalPitch - f.pitch;
       const dl = f.goalLean - f.lean;
-      if (Math.abs(dy) + Math.abs(dp) + Math.abs(dl) < 1e-3) return;
-      f.yaw += dy * k;
-      f.pitch += dp * k;
-      f.lean += dl * k;
-      // the body follows the head a little, the head does the rest
-      f.body.rotation.set(-f.lean, f.yaw * 0.25, 0);
-      f.head.rotation.set(-f.pitch * 0.85, f.yaw * 0.75, 0, 'YXZ');
-      active = true;
+      const moving = Math.abs(dy) + Math.abs(dp) + Math.abs(dl) >= 1e-3;
+      if (moving) {
+        f.yaw += dy * k;
+        f.pitch += dp * k;
+        f.lean += dl * k;
+        active = true;
+      }
+      if (!moving && !f.rig) return;
+      if (f.additive) {
+        // the body follows a little; the animated head turns further, in the figure's own frame
+        f.body.rotation.set(-f.lean * 0.6, f.yaw * 0.2, 0);
+        f.root.updateMatrixWorld(true);
+        const parent = f.head.parent!;
+        f.root.getWorldQuaternion(qRoot);
+        parent.getWorldQuaternion(qParent);
+        eLook.set(-f.pitch * 0.8, f.yaw * 0.75, 0, 'YXZ');
+        qLook.setFromEuler(eLook);
+        // world rotation = root · look · root⁻¹, then into the parent's frame
+        qLook.premultiply(qRoot).multiply(qRoot.clone().invert());
+        qLook.premultiply(qParent.clone().invert()).multiply(qParent);
+        f.head.quaternion.premultiply(qLook);
+      } else {
+        f.body.rotation.set(-f.lean, f.yaw * 0.25, 0);
+        f.head.rotation.set(-f.pitch * 0.85, f.yaw * 0.75, 0, 'YXZ');
+      }
     });
     return active;
   }
 
-  /** Head positions for name plates */
+  /** Point above a player's head, for their name plate */
   headOf(playerId: string, out: THREE.Vector3) {
     const f = this.figures.get(playerId);
     if (!f) return null;
-    return out.set(f.root.position.x, EYE_Y + 2.3, f.root.position.z);
+    return out.set(f.root.position.x, f.top, f.root.position.z);
   }
 }

@@ -103,6 +103,7 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
     }
     stage.sync(view, me, stage.takeNextSync());
     chars.look(view, layout, me);
+    chars.react(lastEv, view);
   }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { stage.setTossLabel(t('discardIt')); }, [stage, t]);
@@ -254,9 +255,9 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
           camera={{ fov: layout.camera.fov, near: 0.2, far: 200, position: layout.camera.pos.toArray() as [number, number, number] }}
           onCreated={({ gl, scene }) => {
             gl.toneMapping = THREE.NeutralToneMapping;
-            gl.toneMappingExposure = 1;
-            scene.background = new THREE.Color('#120e0b');
-            scene.fog = new THREE.Fog('#120e0b', 45, 130);
+            gl.toneMappingExposure = 1.12;
+            scene.background = new THREE.Color('#1b1410');
+            scene.fog = new THREE.Fog('#1b1410', 60, 150);
             setAnisotropy(gl.capabilities.getMaxAnisotropy());
           }}
           onPointerMissed={onOut}
@@ -390,7 +391,7 @@ function StageDriver({ stage, chars }: { stage: TableStage; chars: Characters })
   useEffect(() => {
     stage.camera = camera;
     stage.canvas = gl.domElement;
-    if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) Object.assign(window as object, { __k3d: stage, __gl: gl });
+    if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) Object.assign(window as object, { __k3d: stage, __gl: gl, __chars: chars });
   }, [stage, camera, gl]);
   useEffect(() => {
     stage.invalidate = () => invalidate();
@@ -493,7 +494,7 @@ function TableAndLamp({ layout, mobile }: { layout: Layout; mobile: boolean }) {
   const shadowSize = mobile ? 1024 : 2048;
   return (
     <group>
-      <hemisphereLight args={['#ffe9cf', '#1a120c', 0.35]} />
+      <hemisphereLight args={['#fff0dc', '#2a1a10', 0.5]} />
       {/* soft fill from behind your shoulder so faces and the card in your hand are not black */}
       <directionalLight position={[2, 9, r + 14]} intensity={0.55} color="#ffe7c8" />
       {/* the lamp over the table */}
@@ -503,8 +504,8 @@ function TableAndLamp({ layout, mobile }: { layout: Layout; mobile: boolean }) {
         angle={Math.atan((r + 3.5) / lampH)}
         penumbra={0.55}
         decay={0}
-        intensity={4.6}
-        color="#ffdcae"
+        intensity={5}
+        color="#ffe4bf"
         castShadow
         shadow-mapSize={[shadowSize, shadowSize]}
         shadow-bias={-0.0004}

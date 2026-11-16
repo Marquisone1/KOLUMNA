@@ -29,9 +29,11 @@ The game is played in first person at a round table by default (three.js through
 - Every step from the engine is played as animate → commit → wait for the cards to land, for both views (`Animator` in `anim.ts`).
 - Phones: the pixel ratio is capped at 1.5, there is one shadow-casting lamp with a 1024 px shadow map, and frames are only rendered while something moves.
 
-### Your own characters
+### Characters
 
-The other players are placeholder figures for now. To use your own models, put `.glb` files where the app can load them (for example `characters/` next to `index.html`) and list their URLs in `components/three/characterModels.ts`. Entry *i* is used for seat colour *i*. Models should be Y-up and face +Z (the glTF default), ideally seated; they are scaled to `CHARACTER_HEIGHT` and stood on the floor behind the table. A node with "head" in its name turns to follow the game.
+The other players are animated characters from the **KayKit Adventurers** pack by Kay Lousberg (www.kaylousberg.com), CC0 1.0, slimmed to the six animations the game uses: they sit on their chairs, reach for a card when they draw or take one, swap, tap a card to flip it, cheer when they clear a column, go out or win a round, and wince when they get doubled. Their heads follow the game. The files are in `public/characters/` with the licence; the loader also looks under `public/` so the same paths work where the source tree is served as is (Google AI Studio). If a model cannot load, a simple placeholder figure sits there instead.
+
+To use other models, list `.glb` files in `components/three/characterModels.ts`. A model is used fully when it has a seated clip, reaction clips and a `head` bone (the names are set in that file); anything else still loads and sits still.
 
 ## How online play works
 
@@ -63,4 +65,4 @@ components/three/ Table3D (canvas, room, lamp, camera at your eyes, name plates)
                   textures (canvas-drawn cards), animator3d
 ```
 
-Icons from lucide (ISC). Design pass guided by unslop by Damir Sokolovsky (@heydamir), CC BY 4.0.
+Icons from lucide (ISC). Characters: KayKit Adventurers by Kay Lousberg, CC0 1.0. Design pass guided by unslop by Damir Sokolovsky (@heydamir), CC BY 4.0 (https://github.com/heydamir/unslop).

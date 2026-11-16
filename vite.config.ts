@@ -8,4 +8,15 @@ export default defineConfig({
     host: '0.0.0.0',
     hmr: false,
   },
+  // modules the 3D table loads on demand; pre-bundled so the dev server never re-optimizes
+  // mid-session (that would load React twice, since HMR is off)
+  optimizeDeps: {
+    include: [
+      'three',
+      '@react-three/fiber',
+      'three/examples/jsm/loaders/GLTFLoader.js',
+      'three/examples/jsm/utils/SkeletonUtils.js',
+      'three/examples/jsm/environments/RoomEnvironment.js',
+    ],
+  },
 });

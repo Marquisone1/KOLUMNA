@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
-import { leatherTexture, pictureTexture, plankTexture, signTexture, wallpaperTexture, woodTexture } from '../textures';
+import { leatherTexture, plankTexture, signTexture, wallpaperTexture, woodTexture } from '../textures';
 import type { RoomProps } from './types';
 
 // A plain neighbourhood bar around the card table: plank floor, wainscoted walls,
@@ -23,12 +23,12 @@ function useDispose(objs: { dispose: () => void }[]) {
 export default function Bar({ mobile }: RoomProps) {
   const tex = useMemo(() => {
     const floor = plankTexture();
-    const wall = wallpaperTexture('#1f2b26');
-    const wood = woodTexture('#3f2717', 80);
+    const wall = wallpaperTexture('#1f5562');
+    const wood = woodTexture('#7a4a28', 80);
     wood.repeat.set(6, 1);
-    const darkWood = woodTexture('#2a1a10', 80);
+    const darkWood = woodTexture('#4a2c18', 80);
     darkWood.repeat.set(8, 1);
-    const leather = leatherTexture('#3a1d14');
+    const leather = leatherTexture('#b8402c');
     leather.repeat.set(2, 2);
     const sign = signTexture('Kolumna', 'BAR · KARTEN · SPIELABEND');
     return { floor, wall, wood, darkWood, leather, sign };
@@ -44,11 +44,11 @@ export default function Bar({ mobile }: RoomProps) {
     iron: new THREE.MeshStandardMaterial({ color: '#1c1916', roughness: 0.5, metalness: 0.6 }),
     leather: new THREE.MeshStandardMaterial({ map: tex.leather, roughness: 0.5, envMapIntensity: 0.6 }),
     mirror: new THREE.MeshStandardMaterial({ color: '#2a2622', roughness: 0.08, metalness: 1, envMapIntensity: 0.9 }),
-    ceiling: new THREE.MeshStandardMaterial({ color: '#17110d', roughness: 0.95 }),
+    ceiling: new THREE.MeshStandardMaterial({ color: '#2a2018', roughness: 0.95 }),
     beam: new THREE.MeshStandardMaterial({ map: tex.darkWood, roughness: 0.7 }),
     shelfLight: new THREE.MeshBasicMaterial({ color: '#ffd59a' }),
     bulb: new THREE.MeshBasicMaterial({ color: '#ffe3b8' }),
-    shade: new THREE.MeshStandardMaterial({ color: '#2b3a33', roughness: 0.45, metalness: 0.3, side: THREE.DoubleSide }),
+    shade: new THREE.MeshStandardMaterial({ color: '#e2452f', roughness: 0.4, metalness: 0.1, side: THREE.DoubleSide }),
     sign: new THREE.MeshStandardMaterial({ map: tex.sign, roughness: 0.6 }),
     night: new THREE.MeshBasicMaterial({ color: '#0b1520' }),
     frame: new THREE.MeshStandardMaterial({ color: '#2a1a10', roughness: 0.5 }),
@@ -64,6 +64,12 @@ export default function Bar({ mobile }: RoomProps) {
       <WindowsWall mats={mats} />
       <SideWalls mats={mats} />
       <SideTables mats={mats} />
+      <StringLights mobile={mobile} />
+      <Bunting />
+      <Plants />
+      <Posters />
+      {/* fill light for the room so it reads warm and open, not a dark cave */}
+      <hemisphereLight args={['#fff1dc', '#5a3a22', 0.45]} />
       {/* pendants over the counter */}
       {[-14, 0, 14].map((x, i) => (
         <Pendant key={x} x={x} z={COUNTER_Z - 2} y={14.5} mats={mats} light={!mobile || i === 1} />
@@ -240,7 +246,7 @@ function BackBar({ mats, mobile }: { mats: Mats; mobile: boolean }) {
         </group>
       ))}
       <primitive object={bottles} />
-      <pointLight position={[0, 9, z + 5]} intensity={mobile ? 30 : 45} distance={36} decay={1.6} color="#ffcf8f" />
+      <pointLight position={[0, 9, z + 5]} intensity={mobile ? 45 : 60} distance={40} decay={1.5} color="#ffd59a" />
       {/* the sign */}
       <mesh position={[0, 17.4, z + 0.6]} material={mats.sign}>
         <boxGeometry args={[22, 5.5, 0.5]} />
@@ -285,7 +291,7 @@ function Pendant({ x, y, z, mats, light }: { x: number; y: number; z: number; ma
       <mesh position={[0, 0.35, 0]} material={mats.bulb}>
         <sphereGeometry args={[0.32, 16, 10]} />
       </mesh>
-      {light && <pointLight position={[0, -0.4, 0]} intensity={30} distance={28} decay={1.6} color="#ffd9a6" />}
+      {light && <pointLight position={[0, -0.4, 0]} intensity={45} distance={32} decay={1.5} color="#ffd9a6" />}
     </group>
   );
 }
@@ -337,7 +343,6 @@ function WindowsWall({ mats }: { mats: Mats }) {
 
 /** Side walls: framed pictures, a dartboard, small sconces */
 function SideWalls({ mats }: { mats: Mats }) {
-  const pics = useMemo(() => [0, 1, 2, 3].map((i) => new THREE.MeshStandardMaterial({ map: pictureTexture(i), roughness: 0.7 })), []);
   const dart = useMemo(() => {
     const c = document.createElement('canvas');
     c.width = c.height = 256;
@@ -358,17 +363,11 @@ function SideWalls({ mats }: { mats: Mats }) {
     t.colorSpace = THREE.SRGBColorSpace;
     return new THREE.MeshStandardMaterial({ map: t, roughness: 0.85 });
   }, []);
-  useEffect(() => () => { pics.forEach((m) => { m.map?.dispose(); m.dispose(); }); dart.map?.dispose(); dart.dispose(); }, [pics, dart]);
+  useEffect(() => () => { dart.map?.dispose(); dart.dispose(); }, [dart]);
   return (
     <group>
       {[-1, 1].map((side) => (
         <group key={side} position={[side * (SIDE_X - 0.3), 0, 0]} rotation-y={-side * Math.PI / 2}>
-          {[-18, 6].map((zz, i) => (
-            <group key={zz} position={[zz * side, 7.5, 0]}>
-              <Box size={[7.4, 9.2, 0.4]} pos={[0, 0, 0.2]} mat={mats.frame} />
-              <mesh position={[0, 0, 0.45]} material={pics[(i + (side > 0 ? 2 : 0)) % pics.length]}><planeGeometry args={[6.2, 8]} /></mesh>
-            </group>
-          ))}
           {/* sconces */}
           {[-6, 18].map((zz) => (
             <group key={zz} position={[zz * side, 11, 0.6]}>
@@ -416,6 +415,163 @@ function SideTables({ mats }: { mats: Mats }) {
             );
           })}
         </group>
+      ))}
+    </group>
+  );
+}
+
+// The card colours, used for the bulbs, the pennants and the posters
+const TIER = ['#3560c4', '#62cbef', '#47ad61', '#f7cb3a', '#e74c35'];
+
+/** A sagging catenary between two points, for strings of lights and pennants */
+function sag(a: THREE.Vector3, b: THREE.Vector3, drop: number, n: number) {
+  return Array.from({ length: n + 1 }, (_, i) => {
+    const t = i / n;
+    const p = a.clone().lerp(b, t);
+    p.y -= drop * 4 * t * (1 - t);
+    return p;
+  });
+}
+
+/** Festoon lights across the room: warm and coloured bulbs on a dark cable */
+function StringLights({ mobile }: { mobile: boolean }) {
+  const { cable, bulbs } = useMemo(() => {
+    const runs = [
+      [new THREE.Vector3(-SIDE_X + 1, 17.5, -30), new THREE.Vector3(SIDE_X - 1, 17.5, -14)],
+      [new THREE.Vector3(-SIDE_X + 1, 17.5, -10), new THREE.Vector3(SIDE_X - 1, 17.5, 6)],
+      [new THREE.Vector3(-SIDE_X + 1, 17.5, 12), new THREE.Vector3(SIDE_X - 1, 17.5, 28)],
+    ];
+    const points: THREE.Vector3[][] = runs.map(([a, b]) => sag(a, b, 3.2, mobile ? 14 : 22));
+    const cable = points.map((pts) => new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 60, 0.05, 4));
+    const geo = new THREE.SphereGeometry(0.32, 10, 8);
+    const mat = new THREE.MeshBasicMaterial({ color: '#ffffff' });
+    const count = points.reduce((n, p) => n + p.length - 2, 0);
+    const bulbs = new THREE.InstancedMesh(geo, mat, count);
+    const m = new THREE.Matrix4();
+    const c = new THREE.Color();
+    let i = 0;
+    points.forEach((pts) => pts.slice(1, -1).forEach((p, k) => {
+      m.makeTranslation(p.x, p.y - 0.45, p.z);
+      bulbs.setMatrixAt(i, m);
+      // mostly warm white, every third bulb in a card colour, softened toward the warm light
+      bulbs.setColorAt(i, k % 3 === 1 ? c.set(TIER[(k + i) % TIER.length]).lerp(new THREE.Color('#ffffff'), 0.25) : c.set('#ffe2b0'));
+      i++;
+    }));
+    bulbs.instanceMatrix.needsUpdate = true;
+    return { cable, bulbs };
+  }, [mobile]);
+  useEffect(() => () => { cable.forEach((g) => g.dispose()); bulbs.geometry.dispose(); (bulbs.material as THREE.Material).dispose(); bulbs.dispose(); }, [cable, bulbs]);
+  const cableMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#1a1410' }), []);
+  return (
+    <group>
+      {cable.map((g, i) => <mesh key={i} geometry={g} material={cableMat} />)}
+      <primitive object={bulbs} />
+    </group>
+  );
+}
+
+/** A pennant garland in the card colours along the back bar */
+function Bunting() {
+  const flags = useMemo(() => {
+    const pts = sag(new THREE.Vector3(-26, 20.6, BACK_Z + 1.2), new THREE.Vector3(26, 20.6, BACK_Z + 1.2), 1.6, 26);
+    const tri = new THREE.BufferGeometry();
+    tri.setAttribute('position', new THREE.Float32BufferAttribute([-0.85, 0, 0, 0.85, 0, 0, 0, -1.7, 0], 3));
+    tri.computeVertexNormals();
+    const mat = new THREE.MeshStandardMaterial({ roughness: 0.85, side: THREE.DoubleSide });
+    const mesh = new THREE.InstancedMesh(tri, mat, pts.length - 1);
+    const m = new THREE.Matrix4();
+    const c = new THREE.Color();
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p = pts[i].clone().lerp(pts[i + 1], 0.5);
+      m.makeTranslation(p.x, p.y, p.z);
+      mesh.setMatrixAt(i, m);
+      mesh.setColorAt(i, c.set(TIER[i % TIER.length]));
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    const line = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, 0.04, 4);
+    return { mesh, line };
+  }, []);
+  useEffect(() => () => { flags.mesh.geometry.dispose(); flags.line.dispose(); }, [flags]);
+  return (
+    <group>
+      <primitive object={flags.mesh} />
+      <mesh geometry={flags.line}><meshBasicMaterial color="#f2e8d6" /></mesh>
+    </group>
+  );
+}
+
+/** Potted plants in the corners and by the windows */
+function Plants() {
+  const parts = useMemo(() => {
+    const pot = new THREE.MeshStandardMaterial({ color: '#c8643c', roughness: 0.8 });
+    const leaf = new THREE.MeshStandardMaterial({ color: '#3f8f4a', roughness: 0.7, side: THREE.DoubleSide });
+    const leafDark = new THREE.MeshStandardMaterial({ color: '#2d6e3a', roughness: 0.7, side: THREE.DoubleSide });
+    const leafGeo = new THREE.SphereGeometry(1, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+    leafGeo.scale(0.5, 2.6, 1.3);
+    return { pot, leaf, leafDark, leafGeo };
+  }, []);
+  useEffect(() => () => { Object.values(parts).forEach((p) => p.dispose()); }, [parts]);
+  const spots: [number, number, number][] = [[-SIDE_X + 4, BACK_Z + 4, 1.2], [SIDE_X - 4, BACK_Z + 4, 1.2], [-SIDE_X + 4, FRONT_Z - 4, 1], [SIDE_X - 4, FRONT_Z - 4, 1], [-16, FRONT_Z - 3, 0.8], [16, FRONT_Z - 3, 0.8]];
+  return (
+    <group>
+      {spots.map(([x, z, sc], i) => (
+        <group key={i} position={[x, FLOOR, z]} scale={sc}>
+          <mesh position={[0, 1.6, 0]} material={parts.pot} castShadow>
+            <cylinderGeometry args={[1.6, 1.2, 3.2, 20]} />
+          </mesh>
+          {Array.from({ length: 9 }, (_, k) => (
+            <mesh
+              key={k}
+              geometry={parts.leafGeo}
+              material={k % 2 ? parts.leaf : parts.leafDark}
+              position={[0, 3.1, 0]}
+              rotation={[0.35 + (k % 3) * 0.18, (k / 9) * Math.PI * 2, 0]}
+              scale={1 + (k % 3) * 0.25}
+            />
+          ))}
+        </group>
+      ))}
+    </group>
+  );
+}
+
+/** Bright posters with big card numerals, the house style of the bar */
+function Posters() {
+  const mats = useMemo(() => [12, -2, 0, 7].map((v, i) => {
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 360;
+    const ctx = c.getContext('2d')!;
+    const ink = v < 0 ? TIER[0] : v === 0 ? TIER[1] : v <= 4 ? TIER[2] : v <= 8 ? TIER[3] : TIER[4];
+    ctx.fillStyle = '#fbf3e4';
+    ctx.fillRect(0, 0, 256, 360);
+    ctx.fillStyle = ink;
+    ctx.fillRect(18, 18, 220, 250);
+    ctx.fillStyle = v === 0 || (v > 4 && v <= 8) ? '#1b2430' : '#ffffff';
+    ctx.font = "600 150px 'Fraunces', Georgia, serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(v < 0 ? '\u2212' + Math.abs(v) : String(v), 128, 150);
+    ctx.fillStyle = '#1b2430';
+    ctx.font = "600 26px 'Instrument Sans', system-ui, sans-serif";
+    ctx.fillText(['Spielabend', 'Jeden Freitag', 'Kolumna', 'Drei gleiche r\u00e4umen ab'][i], 128, 312);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.MeshStandardMaterial({ map: t, roughness: 0.75 });
+  }), []);
+  useEffect(() => () => mats.forEach((m) => { m.map?.dispose(); m.dispose(); }), [mats]);
+  const spots: { pos: [number, number, number]; rot: number }[] = [
+    { pos: [-SIDE_X + 0.4, 9, -6], rot: Math.PI / 2 },
+    { pos: [-SIDE_X + 0.4, 9, 6], rot: Math.PI / 2 },
+    { pos: [SIDE_X - 0.4, 9, -2], rot: -Math.PI / 2 },
+    { pos: [SIDE_X - 0.4, 9, 10], rot: -Math.PI / 2 },
+  ];
+  return (
+    <group>
+      {spots.map((s, i) => (
+        <mesh key={i} position={s.pos} rotation-y={s.rot} material={mats[i]}>
+          <planeGeometry args={[6, 8.4]} />
+        </mesh>
       ))}
     </group>
   );
