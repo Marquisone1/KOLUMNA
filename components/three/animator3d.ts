@@ -1,7 +1,7 @@
 import { flushSync } from 'react-dom';
 import { sfx } from '../../audio';
-import { commitSound, type Animator } from '../../anim';
-import type { GameEvent } from '../../game/types';
+import type { Animator } from '../../anim';
+import type { GameEvent, GameState } from '../../game/types';
 import { stageRef, type SyncOptions } from './stage';
 
 // The 3D table plays every step in the same order as the 2D one: animate on the old state,
@@ -9,6 +9,16 @@ import { stageRef, type SyncOptions } from './stage';
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const reduced = () => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** Where a player sits, as a stereo position: you are in the middle, the others left or right */
+function panFor(state: GameState, pid: string | undefined): number {
+  const st = stageRef.current;
+  const L = st?.layout;
+  if (!L || !pid) return 0;
+  const i = state.players.findIndex((p) => p.id === pid);
+  const seat = L.seats[i];
+  return seat ? Math.max(-0.85, Math.min(0.85, seat.x / 9)) : 0;
+}
 
 function optionsFor(ev: GameEvent): SyncOptions {
   switch (ev.k) {
@@ -24,6 +34,18 @@ function optionsFor(ev: GameEvent): SyncOptions {
   }
 }
 
+function commitSound3d(ev: GameEvent, state: GameState) {
+  switch (ev.k) {
+    case 'flip': sfx.flip({ pan: panFor(state, ev.p) }); break;
+    case 'reveal':
+      // every face-down card turns, round the table
+      state.players.forEach((p, i) => sfx.flip({ when: i * 0.12, pan: panFor(state, p.id), gain: 0.7 }));
+      break;
+    case 'deal': sfx.deal(14, state.players.map((p) => panFor(state, p.id))); break;
+    case 'roundEnd': sfx.end(); break;
+  }
+}
+
 export const threeAnimator: Animator = {
   async before(ev, state, myId) {
     const st = stageRef.current;
@@ -32,21 +54,29 @@ export const threeAnimator: Animator = {
     switch (ev.k) {
       case 'draw':
       case 'take':
-        sfx.slide();
+        sfx.slide({ pan: panFor(state, ev.p) });
         break;
-      case 'swap':
-        setTimeout(() => sfx.place(), 420);
+      case 'swap': {
+        // the outgoing card lands on the pile, the incoming one in the grid a beat later
+        const pan = panFor(state, ev.p);
+        sfx.toss({ when: 0.4, pan: pan * 0.4, gain: 0.7 });
+        sfx.place({ when: 0.5, pan });
         break;
+      }
       case 'toss':
-        setTimeout(() => sfx.place(), 380);
+        sfx.toss({ when: 0.36, pan: panFor(state, ev.p) * 0.4 });
         break;
       case 'clear':
-        sfx.clear();
+        sfx.clear({ pan: panFor(state, ev.p) });
         st.raise(ev.cards.map((c) => c.id), true);
         await wait(st.reduced ? 60 : 460);
         break;
       case 'deal':
-        if (st.cards.size) await st.gather();
+        // everyone's cards are swept together and riffled before the new deal
+        if (st.cards.size) {
+          sfx.shuffle();
+          await st.gather();
+        }
         break;
       case 'shuffle': {
         sfx.shuffle();
@@ -67,7 +97,7 @@ export const threeAnimator: Animator = {
     if (skip) apply();
     else flushSync(apply);
     if (st && ev.k === 'clear') st.raise(ev.cards.map((c) => c.id), false);
-    if (!skip) commitSound(ev);
+    if (!skip) commitSound3d(ev, _state);
   },
 
   async after(ev) {

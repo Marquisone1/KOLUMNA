@@ -126,7 +126,7 @@ export async function animateBefore(ev: GameEvent, myId: string) {
       const srcWasUp = src ? src.classList.contains('is-up') : true;
       const flight = fly({ from: src, to: anchor('discard'), v: ev.card.v, upFrom: srcWasUp, upTo: true });
       hide(src);
-      setTimeout(() => sfx.place(), 320);
+      setTimeout(() => sfx.toss(), 320);
       await flight;
       break;
     }
@@ -176,8 +176,10 @@ export function afterDelay(ev: GameEvent, state?: GameState): number {
 
 /** Sound that belongs to the moment of commit */
 export function commitSound(ev: GameEvent) {
-  if (ev.k === 'flip' || ev.k === 'reveal') sfx.flip();
-  if (ev.k === 'deal') sfx.shuffle();
+  if (ev.k === 'flip') sfx.flip();
+  // the final reveal turns every card: a short ripple of snaps
+  if (ev.k === 'reveal') for (let i = 0; i < 5; i++) sfx.flip({ when: i * 0.07, gain: 0.6 });
+  if (ev.k === 'deal') sfx.deal(12);
   if (ev.k === 'roundEnd') sfx.end();
 }
 

@@ -16,6 +16,7 @@ import { feltTexture, leatherTexture, loadCardFonts, redrawCards, setAnisotropy,
 import { DEFAULT_ROOM, ROOMS, type RoomId } from './rooms';
 import { threeAnimator } from './animator3d';
 import { preload3d, preloadProgress } from './preload';
+import { sfx } from '../../audio';
 import { FeltBounce, LampHaze, PostEffects, QualityWatch, initialQuality, qualityForced, type Quality } from './Graphics';
 
 interface Props {
@@ -283,6 +284,7 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
     if (hit.pile === 'discard' && m.discardActive) m.onDiscard();
     if (hit.pile === 'toss' && m.canToss && m.canAct) {
       stage.pressToss();
+      sfx.press();
       send({ a: 'toss' });
     }
     clearHover();
@@ -343,7 +345,7 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
         {m.finalNote && <p className="status-final">{m.finalNote}</p>}
         {/* the real button rises out of the table; this one is for keyboards and screen readers */}
         {m.canToss && (
-          <button type="button" className="sr-only" onClick={() => { stage.pressToss(); send({ a: 'toss' }); }} disabled={!m.canAct}>
+          <button type="button" className="sr-only" onClick={() => { stage.pressToss(); sfx.press(); send({ a: 'toss' }); }} disabled={!m.canAct}>
             {t('discardIt')}
           </button>
         )}

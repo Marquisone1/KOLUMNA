@@ -57,7 +57,7 @@ To use other models, list `.glb` files in `components/three/characterModels.ts`.
 ```
 index.html  index.tsx  index.css  App.tsx  metadata.json
 i18n.ts           German and English strings
-audio.ts          synthesized card sounds (Web Audio)
+audio.ts          card sounds: recorded samples with variation and stereo position, synthesized fallback
 anim.ts           Animator interface; 2D card flights, flips, layout shifts
 useGame.ts        plays incoming steps: animate, then commit
 game/types.ts     data model
@@ -75,4 +75,4 @@ components/three/ Table3D (canvas, room, lamp, camera at your eyes, name plates)
                   textures (canvas-drawn cards), animator3d
 ```
 
-Icons from lucide (ISC). Characters: KayKit Adventurers by Kay Lousberg, CC0 1.0. Design pass guided by unslop by Damir Sokolovsky (@heydamir), CC BY 4.0 (https://github.com/heydamir/unslop).
+Icons from lucide (ISC). Characters: KayKit Adventurers by Kay Lousberg, CC0 1.0. Sounds: Casino Audio by Kenney (kenney.nl), CC0 1.0 (public/sounds). Design pass guided by unslop by Damir Sokolovsky (@heydamir), CC BY 4.0 (https://github.com/heydamir/unslop).

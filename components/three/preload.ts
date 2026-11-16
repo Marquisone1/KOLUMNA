@@ -27,6 +27,7 @@ export function preload3d(): Promise<void> {
   track('room', () => import('./rooms/Bar'));
   track('fonts', () => import('./textures').then((m) => m.loadCardFonts()));
   track('characters', () => import('./characters').then((m) => m.preloadCharacters()));
+  track('sounds', () => import('../../audio').then((m) => m.loadSamples()));
   return Promise.all(tasks.values()).then(() => undefined);
 }
 
