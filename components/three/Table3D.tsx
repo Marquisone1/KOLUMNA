@@ -10,7 +10,8 @@ import { useTableModel } from '../useTableModel';
 import { SEAT_COLORS } from '../PlayerBoard';
 import { Icon } from '../Icon';
 import { TableStage, stageRef } from './stage';
-import { computeLayout, GRID_D, GRID_W, seatPoint, type Layout } from './layout';
+import { Characters } from './characters';
+import { computeLayout, type Layout } from './layout';
 import { feltTexture, loadCardFonts, redrawCards, setAnisotropy, woodTexture } from './textures';
 import { threeAnimator } from './animator3d';
 
@@ -26,16 +27,31 @@ interface Props {
   animator: RefObject<Animator>;
 }
 
-// Room for the HTML status at the top and the own name plate at the bottom, in px
-const HUD_TOP = 100;
-const HUD_BOTTOM = 44;
+// Room for the HTML status at the top and your own name plate at the bottom, in px
+const HUD_TOP = 64;
+const HUD_BOTTOM = 40;
+/** Floor height below the table top (a table is about 74 cm high) */
+const FLOOR_Y = -7.4;
+
+/** Things the frame loop writes into the DOM: name plates over heads, the deck count */
+interface Overlay {
+  plates: Map<string, HTMLDivElement>;
+  deck: HTMLSpanElement | null;
+}
+
+/** Looking around: drag offsets for the head, eased back once you let go */
+interface Look { yaw: number; pitch: number; dragging: boolean }
 
 export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, onHover, animator }: Props) {
   const { t } = useI18n();
   const m = useTableModel(view, me, busy, lastEv, send);
   const stage = useMemo(() => new TableStage(), []);
+  const chars = useMemo(() => new Characters(), []);
   const wrap = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
+  const overlay = useRef<Overlay>({ plates: new Map(), deck: null });
+  const look = useRef<Look>({ yaw: 0, pitch: 0, dragging: false });
+  const invalidateRef = useRef<() => void>(() => {});
 
   // This table plays the steps while it is mounted
   useLayoutEffect(() => {
@@ -67,12 +83,15 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
   );
 
   // Layout changes (resize, players joining) move everything into place at once
+  const seatKey = view.players.map((p) => p.id + p.seat).join();
   useLayoutEffect(() => {
     stage.setLayout(layout, view.players);
     stage.sync(view, me, { instant: true });
-  }, [layout]); // eslint-disable-line react-hooks/exhaustive-deps
+    chars.setSeats(layout, view.players, me);
+    chars.look(view, layout, me);
+  }, [layout, seatKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Every committed state: cards fly to their new places
+  // Every committed state: cards fly to their new places, heads turn
   const firstSync = useRef(true);
   useLayoutEffect(() => {
     if (firstSync.current) {
@@ -80,7 +99,10 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
       return;
     }
     stage.sync(view, me, stage.takeNextSync());
+    chars.look(view, layout, me);
   }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { stage.setTossLabel(t('discardIt')); }, [stage, t]);
 
   // Which cards and piles take a click right now
   const mine = m.mine;
@@ -90,6 +112,7 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
     stage.selectable = sel;
     stage.deckActive = m.deckActive;
     stage.discardActive = m.discardActive;
+    stage.tossActive = m.canToss && m.canAct;
     const peers = new Map<number, string>();
     if (hovers) {
       for (const [pid, h] of Object.entries(hovers)) {
@@ -101,18 +124,58 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
     stage.refreshInteractive();
   });
 
+  // Drag anywhere to look around; the head turns back when you let go
+  useEffect(() => {
+    const el = wrap.current;
+    if (!el) return;
+    let start: { x: number; y: number; yaw: number; pitch: number; id: number } | null = null;
+    const down = (e: PointerEvent) => {
+      if ((e.target as HTMLElement).closest('button')) return;
+      start = { x: e.clientX, y: e.clientY, yaw: look.current.yaw, pitch: look.current.pitch, id: e.pointerId };
+    };
+    const move = (e: PointerEvent) => {
+      if (!start || e.pointerId !== start.id) return;
+      const dx = e.clientX - start.x;
+      const dy = e.clientY - start.y;
+      if (!look.current.dragging && Math.hypot(dx, dy) < 8) return;
+      look.current.dragging = true;
+      const k = 1.6 / Math.max(320, el.clientWidth);
+      look.current.yaw = Math.max(-1.2, Math.min(1.2, start.yaw + dx * k));
+      look.current.pitch = Math.max(-0.45, Math.min(0.45, start.pitch + dy * k));
+      invalidateRef.current();
+    };
+    const up = (e: PointerEvent) => {
+      if (!start || e.pointerId !== start.id) return;
+      start = null;
+      // let the click handler see that this was a drag, then release
+      setTimeout(() => { look.current.dragging = false; invalidateRef.current(); }, 0);
+    };
+    el.addEventListener('pointerdown', down);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+    return () => {
+      el.removeEventListener('pointerdown', down);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+    };
+  }, []);
+
   // Pointer → action
   const lastHoverSent = useRef(0);
-  const pick = (e: ThreeEvent<PointerEvent | MouseEvent>) => {
+  type Hit = { card: number } | { pile: 'deck' | 'discard' | 'toss' } | null;
+  const pick = (e: ThreeEvent<PointerEvent | MouseEvent>): Hit => {
     const ud = e.object.userData as { cardId?: number; anchor?: string };
     if (ud.cardId !== undefined) {
       if (stage.selectable.has(ud.cardId)) return { card: ud.cardId };
-      if (stage.isTopDiscard(ud.cardId)) return { pile: 'discard' as const };
+      if (stage.isTopDiscard(ud.cardId)) return { pile: 'discard' };
       return null;
     }
-    if (ud.anchor === 'deck' || ud.anchor === 'discard') return { pile: ud.anchor as 'deck' | 'discard' };
+    if (ud.anchor === 'deck' || ud.anchor === 'discard' || ud.anchor === 'toss') return { pile: ud.anchor };
     return null;
   };
+  const pileActive = (p: 'deck' | 'discard' | 'toss') => (p === 'deck' ? stage.deckActive : p === 'discard' ? stage.discardActive : stage.tossActive);
   const setCursor = (on: boolean) => { if (wrap.current) wrap.current.style.cursor = on ? 'pointer' : ''; };
   const clearHover = () => {
     if (stage.hovered !== null || stage.pileHover) {
@@ -138,17 +201,16 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
   };
   const onMove = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
-    if (e.pointerType === 'touch') return;
+    if (e.pointerType === 'touch' || look.current.dragging) return;
     const hit = pick(e);
-    const card = hit && 'card' in hit ? hit.card ?? null : null;
-    const pile = hit && 'pile' in hit ? hit.pile ?? null : null;
-    const pileOn = pile === 'deck' ? stage.deckActive : pile === 'discard' ? stage.discardActive : false;
-    if (stage.hovered !== card || stage.pileHover !== (pileOn ? pile : null)) {
+    const card = hit && 'card' in hit ? hit.card : null;
+    const pile = hit && 'pile' in hit && pileActive(hit.pile) ? hit.pile : null;
+    if (stage.hovered !== card || stage.pileHover !== pile) {
       stage.hovered = card;
-      stage.pileHover = pileOn ? pile : null;
+      stage.pileHover = pile;
       stage.refreshInteractive();
     }
-    setCursor(card !== null || pileOn);
+    setCursor(card !== null || pile !== null);
     const own = (e.object.userData as { cardId?: number }).cardId;
     reportHover(own !== undefined && stage.slots.has(own) ? own : null);
   };
@@ -158,60 +220,26 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
   };
   const onClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
+    if (look.current.dragging || e.delta > 8) return;
     const hit = pick(e);
     if (!hit) return;
-    if ('card' in hit && hit.card !== undefined) {
+    if ('card' in hit) {
       reportHover(null);
       clearHover();
       m.onMyCard(hit.card);
-    } else if ('pile' in hit) {
-      if (hit.pile === 'deck' && m.deckActive) m.onDeck();
-      if (hit.pile === 'discard' && m.discardActive) m.onDiscard();
-      clearHover();
+      return;
     }
+    if (hit.pile === 'deck' && m.deckActive) m.onDeck();
+    if (hit.pile === 'discard' && m.discardActive) m.onDiscard();
+    if (hit.pile === 'toss' && m.canToss && m.canAct) {
+      stage.pressToss();
+      send({ a: 'toss' });
+    }
+    clearHover();
   };
 
-  // Name plates: project each seat's anchor with the same camera the canvas uses
-  const plates = useMemo(() => {
-    if (!size.w || !size.h) return [];
-    const cam = new THREE.PerspectiveCamera(layout.camera.fov, size.w / size.h, 0.1, 200);
-    cam.position.copy(layout.camera.pos);
-    cam.lookAt(layout.camera.target);
-    cam.updateMatrixWorld();
-    cam.updateProjectionMatrix();
-    const v = new THREE.Vector3();
-    return view.players.map((p, i) => {
-      const seat = layout.seats[i];
-      if (!seat) return null;
-      // the grid's outline on screen; the plate sits above it (below it for your own grid)
-      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-      const hw = (GRID_W + 0.36) / 2;
-      const hd = (GRID_D + 0.36) / 2;
-      for (const [lx, lz] of [[-hw, -hd], [hw, -hd], [-hw, hd], [hw, hd]]) {
-        const q = seatPoint(seat, lx, lz);
-        v.set(q.x, 0, q.z).project(cam);
-        const sx = ((v.x + 1) / 2) * size.w;
-        const sy = ((1 - v.y) / 2) * size.h;
-        x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
-      }
-      const mine = p.id === me;
-      return { id: p.id, x: (x0 + x1) / 2, y: mine ? y1 + 4 : y0 - 4 };
-    });
-  }, [layout, size, view.players, me]);
-  const anchors = useMemo(() => {
-    if (!size.w) return null;
-    const cam = new THREE.PerspectiveCamera(layout.camera.fov, size.w / size.h, 0.1, 200);
-    cam.position.copy(layout.camera.pos);
-    cam.lookAt(layout.camera.target);
-    cam.updateMatrixWorld();
-    cam.updateProjectionMatrix();
-    const toScreen = (v: THREE.Vector3) => { v.project(cam); return { x: ((v.x + 1) / 2) * size.w, y: ((1 - v.y) / 2) * size.h }; };
-    return {
-      deck: toScreen(new THREE.Vector3(layout.deck.x, 0, layout.deck.z + 0.62)),
-    };
-  }, [layout, size]);
-
   const current = view.players[view.turn];
+  const meP = m.mine;
   return (
     <div className="table3d" ref={wrap}>
       {size.w > 0 && (
@@ -220,58 +248,58 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
           dpr={[1, Math.min(typeof devicePixelRatio === 'number' ? devicePixelRatio : 1, size.w < 700 ? 1.5 : 1.75)]}
           frameloop="demand"
           gl={{ antialias: true, powerPreference: 'high-performance', alpha: false }}
-          camera={{ fov: layout.camera.fov, near: 0.1, far: 120, position: layout.camera.pos.toArray() as [number, number, number] }}
+          camera={{ fov: layout.camera.fov, near: 0.2, far: 160, position: layout.camera.pos.toArray() as [number, number, number] }}
           onCreated={({ gl, scene }) => {
             gl.toneMapping = THREE.NeutralToneMapping;
             gl.toneMappingExposure = 1;
-            scene.background = new THREE.Color('#141210');
+            scene.background = new THREE.Color('#110f0d');
+            scene.fog = new THREE.Fog('#110f0d', 30, 70);
             setAnisotropy(gl.capabilities.getMaxAnisotropy());
           }}
           onPointerMissed={onOut}
         >
-          <CameraRig layout={layout} />
-          <Lights layout={layout} />
-          <TableTop layout={layout} />
-          <StageDriver stage={stage} />
+          <CameraRig layout={layout} look={look} invalidateRef={invalidateRef} />
+          <Room layout={layout} mobile={size.w < 700} />
+          <StageDriver stage={stage} chars={chars} />
+          <primitive object={chars.root} />
           <primitive object={stage.root} onPointerMove={onMove} onPointerOut={onOut} onClick={onClick} />
+          <OverlayDriver overlay={overlay} chars={chars} layout={layout} />
         </Canvas>
       )}
 
       <div className="hud3d" aria-live="polite">
         <p className={'status-main tone-' + m.tone}>{m.status}</p>
         {m.finalNote && <p className="status-final">{m.finalNote}</p>}
+        {/* the real button rises out of the table; this one is for keyboards and screen readers */}
         {m.canToss && (
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => send({ a: 'toss' })} disabled={!m.canAct}>
+          <button type="button" className="sr-only" onClick={() => { stage.pressToss(); send({ a: 'toss' }); }} disabled={!m.canAct}>
             {t('discardIt')}
           </button>
         )}
         {m.toast && <div className="toast3d" role="status">{m.toast}</div>}
       </div>
 
-      {anchors && (
-        <span className="pile-tag3d tabular" style={{ left: anchors.deck.x, top: anchors.deck.y }}>
-          {t('deck')} {view.deckCount}
-        </span>
-      )}
+      <span className="pile-tag3d tabular" ref={(el) => { overlay.current.deck = el; }}>
+        {t('deck')} {view.deckCount}
+      </span>
 
-      {plates.map((pl, i) => {
-        if (!pl) return null;
-        const p = view.players[i];
-        const isMe = p.id === me;
+      {view.players.map((p) => {
+        if (p.id === me) return null;
         const isTurn = view.phase === 'play' && current?.id === p.id;
         const done = view.phase === 'setup' && p.setupFlips >= 2;
         return (
           <div
             key={p.id}
-            className={'plate3d' + (isMe ? ' is-me' : '') + (isTurn ? ' is-turn' : '') + (!p.connected ? ' is-offline' : '')}
-            style={{ left: pl.x, top: pl.y, '--seat': SEAT_COLORS[p.seat % 6] } as CSSProperties}
+            ref={(el) => { if (el) overlay.current.plates.set(p.id, el); else overlay.current.plates.delete(p.id); }}
+            className={'plate3d' + (isTurn ? ' is-turn' : '') + (!p.connected ? ' is-offline' : '')}
+            style={{ '--seat': SEAT_COLORS[p.seat % 6] } as CSSProperties}
           >
             <span className="seat-dot" />
-            <span className="board-name">{p.name}{isMe && <span className="muted"> · {t('you')}</span>}</span>
+            <span className="board-name">{p.name}</span>
             {p.bot && <span className="tag"><Icon name="bot" size={12} />{t('bot')}</span>}
             {!p.connected && !p.bot && <span className="tag tag-warn"><Icon name="wifiOff" size={12} />{t('offline')}</span>}
             {view.finisher === p.id && view.phase === 'play' && <span className="tag tag-accent">{t('wentOut')}</span>}
-            {view.phase === 'setup' && !isMe && (done ? <Icon name="check" size={14} /> : <span className="muted tabular">{p.setupFlips}/2</span>)}
+            {view.phase === 'setup' && (done ? <Icon name="check" size={14} /> : <span className="muted tabular">{p.setupFlips}/2</span>)}
             <span className="plate-score tabular" title={t('visible')}>{visibleSum(p)}</span>
             <span className="plate-total tabular" title={t('total')}>{p.total}<span className="muted">/{view.target}</span></span>
             {isHost && !p.connected && !p.bot && (
@@ -282,24 +310,65 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
           </div>
         );
       })}
+
+      {meP && (
+        <div
+          className={'plate3d is-me' + (view.phase === 'play' && current?.id === me ? ' is-turn' : '')}
+          style={{ '--seat': SEAT_COLORS[meP.seat % 6] } as CSSProperties}
+        >
+          <span className="seat-dot" />
+          <span className="board-name">{meP.name}<span className="muted"> · {t('you')}</span></span>
+          {view.finisher === me && view.phase === 'play' && <span className="tag tag-accent">{t('wentOut')}</span>}
+          <span className="plate-score tabular" title={t('visible')}>{visibleSum(meP)}</span>
+          <span className="plate-total tabular" title={t('total')}>{meP.total}<span className="muted">/{view.target}</span></span>
+        </div>
+      )}
     </div>
   );
 }
 
-function CameraRig({ layout }: { layout: Layout }) {
-  const { camera, invalidate, size } = useThree();
+/** The camera is your eyes: fixed at your seat, turned by dragging, easing back to the table */
+function CameraRig({ layout, look, invalidateRef }: { layout: Layout; look: RefObject<Look>; invalidateRef: RefObject<() => void> }) {
+  const { camera, invalidate } = useThree();
+  const cur = useRef({ yaw: 0, pitch: 0 });
+  const base = useMemo(() => {
+    const d = layout.camera.target.clone().sub(layout.camera.pos);
+    return { yaw: Math.atan2(-d.x, -d.z), pitch: Math.atan2(-d.y, Math.hypot(d.x, d.z)) };
+  }, [layout]);
   useLayoutEffect(() => {
+    invalidateRef.current = () => invalidate();
     const cam = camera as THREE.PerspectiveCamera;
     cam.fov = layout.camera.fov;
     cam.position.copy(layout.camera.pos);
-    cam.lookAt(layout.camera.target);
     cam.updateProjectionMatrix();
     invalidate();
-  }, [layout, camera, invalidate, size.width, size.height]);
+  }, [layout, camera, invalidate, invalidateRef]);
+  useFrame((_, dt) => {
+    const L = look.current;
+    if (!L.dragging) {
+      // the head turns back to the table by itself
+      const k = 1 - Math.exp(-dt * 3);
+      L.yaw -= L.yaw * k;
+      L.pitch -= L.pitch * k;
+      if (Math.abs(L.yaw) < 1e-4) L.yaw = 0;
+      if (Math.abs(L.pitch) < 1e-4) L.pitch = 0;
+    }
+    const c = cur.current;
+    const k2 = 1 - Math.exp(-dt * 14);
+    c.yaw += (L.yaw - c.yaw) * k2;
+    c.pitch += (L.pitch - c.pitch) * k2;
+    if (Math.abs(c.yaw - L.yaw) < 1e-4) c.yaw = L.yaw;
+    if (Math.abs(c.pitch - L.pitch) < 1e-4) c.pitch = L.pitch;
+    const yaw = base.yaw - c.yaw;
+    const pitch = Math.max(-0.2, Math.min(1.35, base.pitch - c.pitch));
+    camera.rotation.set(-pitch, yaw, 0, 'YXZ');
+    camera.updateMatrixWorld();
+    if (c.yaw !== 0 || c.pitch !== 0 || L.yaw !== 0 || L.pitch !== 0) invalidate();
+  }, -1);
   return null;
 }
 
-function StageDriver({ stage }: { stage: TableStage }) {
+function StageDriver({ stage, chars }: { stage: TableStage; chars: Characters }) {
   const { invalidate, camera, gl } = useThree();
   useEffect(() => {
     stage.camera = camera;
@@ -308,105 +377,164 @@ function StageDriver({ stage }: { stage: TableStage }) {
   }, [stage, camera, gl]);
   useEffect(() => {
     stage.invalidate = () => invalidate();
+    chars.invalidate = () => invalidate();
     let alive = true;
     // card faces are drawn again once Fraunces has loaded
     loadCardFonts().then(() => { if (alive) { redrawCards(); invalidate(); } });
-    return () => { alive = false; stage.invalidate = () => {}; };
-  }, [stage, invalidate]);
+    return () => { alive = false; stage.invalidate = () => {}; chars.invalidate = () => {}; };
+  }, [stage, chars, invalidate]);
   useFrame((_, dt) => {
-    if (stage.update(Math.min(dt, 0.05))) invalidate();
+    const d = Math.min(dt, 0.05);
+    const a = stage.update(d);
+    const b = chars.update(d);
+    if (a || b) invalidate();
   });
   return null;
 }
 
-function Lights({ layout }: { layout: Layout }) {
-  const target = useMemo(() => new THREE.Object3D(), []);
-  const cz = layout.table.cz;
-  const reach = Math.max(layout.table.rx, layout.table.rz);
-  useLayoutEffect(() => {
-    target.position.set(0, 0, cz);
-    target.updateMatrixWorld();
-  }, [target, cz]);
-  const h = 7 + reach * 0.6;
-  return (
-    <>
-      <hemisphereLight args={['#fff0dc', '#1a120c', 0.7]} />
-      {/* the lamp over the table */}
-      <spotLight
-        position={[0.4, h, cz + 0.6]}
-        target={target}
-        angle={Math.atan((reach + 2.2) / h)}
-        penumbra={0.85}
-        decay={0}
-        intensity={4.2}
-        color="#ffe2bb"
-        castShadow
-        shadow-mapSize={[1024, 1024]}
-        shadow-bias={-0.0004}
-        shadow-normalBias={0.015}
-        shadow-radius={4}
-        shadow-camera-near={h - 3}
-        shadow-camera-far={h + 2}
-      />
-      <primitive object={target} />
-    </>
-  );
+/** Each frame: put the name plates over the heads and the deck count under the deck */
+function OverlayDriver({ overlay, chars, layout }: { overlay: RefObject<Overlay>; chars: Characters; layout: Layout }) {
+  const { camera, size } = useThree();
+  const v = useMemo(() => new THREE.Vector3(), []);
+  // name plates stay on screen even when the head is out of view; the deck tag just hides
+  const place = (el: HTMLElement, p: THREE.Vector3, clamp: boolean) => {
+    p.project(camera);
+    const behind = p.z > 1;
+    let x = ((p.x + 1) / 2) * size.width;
+    let y = ((1 - p.y) / 2) * size.height;
+    if (clamp) {
+      if (behind) { x = size.width - x; y = HUD_TOP + 30; }
+      const half = el.offsetWidth / 2 + 8;
+      x = Math.max(half, Math.min(size.width - half, x));
+      y = Math.max(HUD_TOP + 30, Math.min(size.height - HUD_BOTTOM - 10, y));
+    } else if (behind || p.x < -1.1 || p.x > 1.1 || p.y < -1.1 || p.y > 1.1) {
+      el.style.visibility = 'hidden';
+      return;
+    }
+    el.style.visibility = '';
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+  };
+  useFrame(() => {
+    const o = overlay.current;
+    o.plates.forEach((el, id) => {
+      if (chars.headOf(id, v)) place(el, v, true);
+      else el.style.visibility = 'hidden';
+    });
+    if (o.deck) place(o.deck, v.set(layout.deck.x, 0, layout.deck.z + 0.62), false);
+  });
+  return null;
 }
 
-/** A superellipse outline: a soft rounded-rectangle table */
-function tableShape(rx: number, rz: number, cz: number, e = 4) {
-  const s = new THREE.Shape();
-  const N = 96;
-  for (let i = 0; i <= N; i++) {
-    const a = (i / N) * Math.PI * 2;
-    const c = Math.cos(a);
-    const sn = Math.sin(a);
-    const x = Math.sign(c) * Math.pow(Math.abs(c), 2 / e) * rx;
-    const y = Math.sign(sn) * Math.pow(Math.abs(sn), 2 / e) * rz;
-    if (i === 0) s.moveTo(x, -(y + cz));
-    else s.lineTo(x, -(y + cz));
-  }
-  return s;
-}
-
-function TableTop({ layout }: { layout: Layout }) {
-  const { rx, rz, cz } = layout.table;
+/** The room: a round table with a wooden rail, a floor, and the lamp hanging over it */
+function Room({ layout, mobile }: { layout: Layout; mobile: boolean }) {
+  const r = layout.table.r;
   const felt = useMemo(() => feltTexture(), []);
   const wood = useMemo(() => woodTexture(), []);
+  const floorTex = useMemo(() => {
+    const t = woodTexture();
+    t.repeat.set(4, 40);
+    return t;
+  }, []);
+  const lampTarget = useMemo(() => new THREE.Object3D(), []);
+  const lampH = 13;
   const geos = useMemo(() => {
-    const top = new THREE.ShapeGeometry(tableShape(rx, rz, cz), 1);
-    // shape is built in XY with y = −z so that rotating to the floor keeps it in place
+    const top = new THREE.CircleGeometry(r, 96);
     top.rotateX(-Math.PI / 2);
     const uv = top.attributes.uv;
     const pos = top.attributes.position;
     for (let i = 0; i < pos.count; i++) uv.setXY(i, pos.getX(i) / 2.2, pos.getZ(i) / 2.2);
-    const railShape = tableShape(rx + 0.5, rz + 0.5, cz);
-    railShape.holes.push(tableShape(rx, rz, cz) as unknown as THREE.Path);
-    const rail = new THREE.ExtrudeGeometry(railShape, { depth: 0.16, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.06, bevelSegments: 3, curveSegments: 64 });
+    const ring = new THREE.Shape();
+    ring.absarc(0, 0, r + 0.55, 0, Math.PI * 2, false);
+    const hole = new THREE.Path();
+    hole.absarc(0, 0, r, 0, Math.PI * 2, true);
+    ring.holes.push(hole);
+    const rail = new THREE.ExtrudeGeometry(ring, { depth: 0.18, bevelEnabled: true, bevelThickness: 0.07, bevelSize: 0.07, bevelSegments: 3, curveSegments: 96 });
     rail.rotateX(-Math.PI / 2);
-    rail.translate(0, -0.08, 0);
+    rail.translate(0, -0.1, 0);
     const rpos = rail.attributes.position;
     const ruv = rail.attributes.uv;
     for (let i = 0; i < rpos.count; i++) {
       const x = rpos.getX(i);
-      const z = rpos.getZ(i) - cz;
-      ruv.setXY(i, (Math.atan2(z / rz, x / rx) / (Math.PI * 2)) * 14, rpos.getY(i) * 2 + Math.hypot(x / rx, z / rz) * 3);
+      const z = rpos.getZ(i);
+      ruv.setXY(i, (Math.atan2(z, x) / (Math.PI * 2)) * 18, rpos.getY(i) * 2 + Math.hypot(x, z) * 0.8);
     }
-    return { top, rail };
-  }, [rx, rz, cz]);
-  useEffect(() => () => { geos.top.dispose(); geos.rail.dispose(); }, [geos]);
+    const apron = new THREE.CylinderGeometry(r + 0.45, r + 0.45, 0.9, 96, 1, true);
+    apron.translate(0, -0.55, 0);
+    return { top, rail, apron };
+  }, [r]);
+  const mats = useMemo(() => ({
+    rail: new THREE.MeshStandardMaterial({ map: wood, roughness: 0.55 }),
+    apron: new THREE.MeshStandardMaterial({ map: wood, roughness: 0.7 }),
+  }), [wood]);
+  useEffect(() => () => { geos.top.dispose(); geos.rail.dispose(); geos.apron.dispose(); }, [geos]);
+  const shadowSize = mobile ? 1024 : 2048;
   return (
     <group>
+      <hemisphereLight args={['#fff0dc', '#1a120c', 0.5]} />
+      {/* soft fill from behind your shoulder so faces and the card in your hand are not black */}
+      <directionalLight position={[2, 9, r + 14]} intensity={0.7} color="#ffe7c8" />
+      {/* the lamp over the table */}
+      <spotLight
+        position={[0, lampH - 0.6, 0]}
+        target={lampTarget}
+        angle={Math.atan((r + 3.5) / lampH)}
+        penumbra={0.6}
+        decay={0}
+        intensity={4.4}
+        color="#ffe0b5"
+        castShadow
+        shadow-mapSize={[shadowSize, shadowSize]}
+        shadow-bias={-0.0004}
+        shadow-normalBias={0.02}
+        shadow-radius={mobile ? 3 : 5}
+        shadow-camera-near={4}
+        shadow-camera-far={lampH + 9}
+      />
+      <primitive object={lampTarget} />
+      <Lamp y={lampH} />
+
       <mesh geometry={geos.top} receiveShadow castShadow>
         <meshStandardMaterial map={felt} roughness={0.96} metalness={0} />
       </mesh>
-      <mesh geometry={geos.rail} castShadow receiveShadow>
-        <meshStandardMaterial map={wood} roughness={0.55} metalness={0} />
+      <mesh geometry={geos.rail} castShadow receiveShadow material={mats.rail} />
+      <mesh geometry={geos.apron} material={mats.apron} />
+      {/* pedestal and foot */}
+      <mesh position={[0, (FLOOR_Y - 1) / 2, 0]} castShadow>
+        <cylinderGeometry args={[0.9, 1.3, -FLOOR_Y - 1, 24]} />
+        <meshStandardMaterial color="#3a2417" roughness={0.6} />
       </mesh>
-      {/* the room below: a dark floor so the table has something to stand on */}
-      <mesh rotation-x={-Math.PI / 2} position={[0, -2.2, cz]}>
-        <planeGeometry args={[80, 80]} />
-        <meshStandardMaterial color="#1a1612" roughness={1} />
+      <mesh position={[0, FLOOR_Y + 0.25, 0]} receiveShadow>
+        <cylinderGeometry args={[3.2, 3.6, 0.5, 32]} />
+        <meshStandardMaterial color="#3a2417" roughness={0.6} />
+      </mesh>
+      <mesh rotation-x={-Math.PI / 2} position={[0, FLOOR_Y, 0]} receiveShadow>
+        <planeGeometry args={[120, 120]} />
+        <meshStandardMaterial map={floorTex} color="#6b5444" roughness={0.85} />
+      </mesh>
+    </group>
+  );
+}
+
+/** A plain pendant: cord, dark enamel shade, the bulb inside it */
+function Lamp({ y }: { y: number }) {
+  const shadeGeo = useMemo(() => {
+    const pts = [new THREE.Vector2(0.35, 1.6), new THREE.Vector2(0.6, 1.45), new THREE.Vector2(1.6, 0.55), new THREE.Vector2(2.6, 0.0)];
+    return new THREE.LatheGeometry(pts, 48);
+  }, []);
+  return (
+    <group position={[0, y, 0]}>
+      <mesh position={[0, 6, 0]}>
+        <cylinderGeometry args={[0.04, 0.04, 9, 6]} />
+        <meshStandardMaterial color="#1a1714" />
+      </mesh>
+      <mesh geometry={shadeGeo}>
+        <meshStandardMaterial color="#2b3a33" roughness={0.45} metalness={0.2} side={THREE.DoubleSide} />
+      </mesh>
+      {/* the bulb: lit from inside, a plain bright surface rather than a glow effect */}
+      <mesh position={[0, 0.45, 0]}>
+        <sphereGeometry args={[0.42, 20, 14]} />
+        <meshBasicMaterial color="#ffe6c2" />
       </mesh>
     </group>
   );

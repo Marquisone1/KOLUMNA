@@ -166,7 +166,14 @@ export class TableStage {
   raised = new Set<number>();
   deckActive = false;
   discardActive = false;
-  pileHover: 'deck' | 'discard' | null = null;
+  tossActive = false;
+  pileHover: 'deck' | 'discard' | 'toss' | null = null;
+  private toss = new THREE.Group();
+  private tossCap: THREE.Mesh;
+  private tossY = -0.7;
+  private tossV = 0;
+  private tossPress = -1;
+  private tossLabel = '';
   reduced = false;
   invalidate: () => void = () => {};
   private waiters: (() => void)[] = [];
@@ -209,7 +216,73 @@ export class TableStage {
     hit.raycast = THREE.Mesh.prototype.raycast;
     this.discardRing = new THREE.Mesh(geo.ring, new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0, depthWrite: false }));
     this.discardRing.raycast = noRaycast;
-    this.root.add(this.matGroup, this.deckMesh, this.deckRing, this.discardMark, this.discardRing);
+    // The discard button: a wooden plinth with a printed cap, sunk into the table until it is needed
+    const plinthMat = new THREE.MeshStandardMaterial({ color: '#5a3a26', roughness: 0.5 });
+    const plinth = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.56, 0.8, 32), plinthMat);
+    plinth.position.y = -0.4;
+    plinth.castShadow = true;
+    this.tossCap = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.1, 32), [
+      new THREE.MeshStandardMaterial({ color: '#e3a34a', roughness: 0.45 }),
+      new THREE.MeshStandardMaterial({ color: '#e3a34a', roughness: 0.45 }),
+      new THREE.MeshStandardMaterial({ color: '#e3a34a', roughness: 0.45 }),
+    ]);
+    this.tossCap.position.y = 0.05;
+    this.tossCap.castShadow = true;
+    plinth.userData.anchor = 'toss';
+    this.tossCap.userData.anchor = 'toss';
+    this.toss.add(plinth, this.tossCap);
+    this.toss.position.y = this.tossY;
+    // the slot it comes out of
+    const slot = new THREE.Mesh(new THREE.RingGeometry(0.56, 0.6, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#0c0f0d', transparent: true, opacity: 0.35, depthWrite: false }));
+    slot.position.y = 0.002;
+    slot.raycast = noRaycast;
+    slot.visible = false;
+    this.tossSlot = slot;
+    this.root.add(this.matGroup, this.deckMesh, this.deckRing, this.discardMark, this.discardRing, this.toss, slot);
+  }
+
+  private tossSlot: THREE.Mesh;
+
+  /** Print the button's label on its cap (language changes redraw it) */
+  setTossLabel(text: string) {
+    if (text === this.tossLabel) return;
+    this.tossLabel = text;
+    const c = document.createElement('canvas');
+    c.width = c.height = 256;
+    const ctx = c.getContext('2d')!;
+    ctx.fillStyle = '#e3a34a';
+    ctx.fillRect(0, 0, 256, 256);
+    ctx.strokeStyle = 'rgba(43,32,20,0.35)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(128, 128, 112, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#2b2014';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    let size = 46;
+    ctx.font = `600 ${size}px 'Instrument Sans', system-ui, sans-serif`;
+    while (ctx.measureText(text).width > 200 && size > 20) {
+      size -= 2;
+      ctx.font = `600 ${size}px 'Instrument Sans', system-ui, sans-serif`;
+    }
+    ctx.fillText(text, 128, 132);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    // the cylinder cap maps the canvas sideways; turn it to read from your seat
+    tex.center.set(0.5, 0.5);
+    tex.rotation = Math.PI / 2;
+    const mats = this.tossCap.material as THREE.MeshStandardMaterial[];
+    mats[1].map?.dispose();
+    mats[1] = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.45 });
+    this.tossCap.material = mats;
+    this.invalidate();
+  }
+
+  /** Short press-in when the button is clicked */
+  pressToss() {
+    this.tossPress = performance.now();
+    this.invalidate();
   }
 
   // ---------- layout ----------
@@ -220,6 +293,9 @@ export class TableStage {
     this.deckRing.position.set(layout.deck.x, 0.0015, layout.deck.z);
     this.discardMark.position.set(layout.discard.x, 0.0008, layout.discard.z);
     this.discardRing.position.set(layout.discard.x, 0.0015, layout.discard.z);
+    this.toss.position.x = layout.toss.x;
+    this.toss.position.z = layout.toss.z;
+    this.tossSlot.position.set(layout.toss.x, 0.002, layout.toss.z);
     // a mat for every seat: slightly lighter felt with a printed rule in the seat colour
     this.matGroup.clear();
     this.mats.clear();
@@ -525,6 +601,20 @@ export class TableStage {
         active = true;
       }
     }
+    // discard button: a spring toward up or down, so it pops out with a small overshoot
+    const goal = this.tossActive ? (this.pileHover === 'toss' ? 0.2 : 0.16) : -0.75;
+    const press = this.tossPress > 0 ? Math.max(0, 1 - (now - this.tossPress) / 220) : 0;
+    if (press === 0) this.tossPress = -1;
+    const d = goal - press * 0.1 - this.tossY;
+    if (Math.abs(d) > 1e-4 || Math.abs(this.tossV) > 1e-4 || press > 0) {
+      const h = Math.min(dt, 1 / 30);
+      this.tossV += (d * 180 - this.tossV * 16) * h;
+      this.tossY += this.tossV * h;
+      this.toss.position.y = this.tossY;
+      this.toss.visible = this.tossY > -0.72;
+      this.tossSlot.visible = this.toss.visible;
+      active = true;
+    }
     this.mats.forEach((m) => {
       if (Math.abs(m.mat.opacity - m.goal) > 1e-3) {
         m.mat.opacity += (m.goal - m.mat.opacity) * k;
@@ -543,13 +633,15 @@ export class TableStage {
   canvas: HTMLElement | null = null;
 
   /** Screen position (client px) of a card or pile, for tests and debugging */
-  screenOf(what: number | 'deck' | 'discard'): { x: number; y: number } | null {
+  screenOf(what: number | 'deck' | 'discard' | 'toss'): { x: number; y: number } | null {
     if (!this.camera || !this.canvas || !this.layout) return null;
     const v = new THREE.Vector3();
     if (typeof what === 'number') {
       const o = this.cards.get(what);
       if (!o) return null;
       o.group.getWorldPosition(v);
+    } else if (what === 'toss') {
+      v.set(this.layout.toss.x, this.tossY + 0.1, this.layout.toss.z);
     } else {
       const p = what === 'deck' ? this.layout.deck : this.layout.discard;
       v.set(p.x, what === 'deck' ? this.deckHeight : CARD_T, p.z);

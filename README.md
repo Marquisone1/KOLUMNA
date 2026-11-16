@@ -20,11 +20,16 @@ Add `?net=local` to the URL to play across tabs of one browser without any netwo
 
 ## 3D table
 
-The game is played at a 3D table by default (three.js through @react-three/fiber). The **2D / 3D** switch in the top bar changes the view at any time, also mid-game; the choice is remembered. Without WebGL, or if the 3D view fails to start, the 2D table is used. `?view=2d` forces 2D.
+The game is played in first person at a round table by default (three.js through @react-three/fiber). You see the table from your chair: your own cards in front of you, the others sitting across and beside you, a lamp hanging over the table. Drag to look around; your view turns back to the table when you let go. The **2D / 3D** switch in the top bar changes the view at any time, also mid-game; the choice is remembered. Without WebGL, or if the 3D view fails to start, the 2D table is used. `?view=2d` forces 2D.
 
+- When you hold a card drawn from the deck, a **Discard** button rises out of the table next to your cards.
 - Card faces, backs, felt and wood are drawn on canvases at runtime; there are no image files.
 - Every step from the engine is played as animate → commit → wait for the cards to land, for both views (`Animator` in `anim.ts`).
 - Phones: the pixel ratio is capped at 1.5, there is one shadow-casting lamp with a 1024 px shadow map, and frames are only rendered while something moves.
+
+### Your own characters
+
+The other players are placeholder figures for now. To use your own models, put `.glb` files where the app can load them (for example `characters/` next to `index.html`) and list their URLs in `components/three/characterModels.ts`. Entry *i* is used for seat colour *i*. Models should be Y-up and face +Z (the glTF default), ideally seated; they are scaled to `CHARACTER_HEIGHT` and stood on the floor behind the table. A node with "head" in its name turns to follow the game.
 
 ## How online play works
 
@@ -49,8 +54,10 @@ net/session.ts    host / guest sessions, reconnect
 components/       Card, PlayerBoard, Table, Scoreboard, Screens, Icon,
                   useTableModel (what can be clicked, status line; shared by 2D and 3D),
                   viewMode (2D/3D choice, WebGL check)
-components/three/ Table3D (canvas, lamp, table, name plates), stage (card objects, flights),
-                  layout (seats, camera fit), textures (canvas-drawn cards), animator3d
+components/three/ Table3D (canvas, room, lamp, camera at your eyes, name plates),
+                  stage (card objects, flights, discard button), characters (people at the table),
+                  characterModels (your .glb files), layout (seats, eye position, camera fit),
+                  textures (canvas-drawn cards), animator3d
 ```
 
 Icons from lucide (ISC). Design pass guided by unslop by Damir Sokolovsky (@heydamir), CC BY 4.0.

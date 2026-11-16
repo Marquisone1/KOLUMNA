@@ -514,7 +514,7 @@ button.card { display: inline-block; }
 .plate3d.is-turn { border-color: var(--seat); }
 .plate3d.is-turn .board-name { font-weight: 600; }
 .plate3d.is-offline { opacity: 0.7; }
-.plate3d.is-me { transform: translate(-50%, 0); font-size: 13px; }
+.plate3d.is-me { left: 50%; top: auto; bottom: 10px; transform: translateX(-50%); font-size: 13px; }
 .plate-score { color: var(--text); font-weight: 600; }
 .plate-total { color: var(--text-2); }
 .pile-tag3d {
