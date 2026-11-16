@@ -45,6 +45,17 @@ export interface RoundResult {
   doubled: boolean;
 }
 
+/** Which table views the players may use: both (each picks), or only one for everybody */
+export type ViewPolicy = 'both' | '2d' | '3d';
+
+export interface Settings {
+  view: ViewPolicy;
+  /** Draw new seats before every round, which changes who plays after whom */
+  shuffleSeats: boolean;
+}
+
+export const DEFAULT_SETTINGS: Settings = { view: 'both', shuffleSeats: false };
+
 export interface GameState {
   phase: Phase;
   round: number;
@@ -64,6 +75,8 @@ export interface GameState {
   starter: string | null;
   result: RoundResult | null;
   nextId: number;
+  /** Set by the host in the lobby. Missing in games saved by older versions: use DEFAULT_SETTINGS. */
+  settings?: Settings;
 }
 
 export type GameEvent =
@@ -102,7 +115,8 @@ export type Action =
   | { a: 'addBot'; name: string }
   | { a: 'remove'; id: string }
   | { a: 'botTakeover'; id: string }
-  | { a: 'target'; value: number };
+  | { a: 'target'; value: number }
+  | { a: 'settings'; view?: ViewPolicy; shuffleSeats?: boolean };
 
 export interface PeerHover {
   card: number | null;

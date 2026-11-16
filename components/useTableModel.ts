@@ -83,6 +83,12 @@ export function useTableModel(view: GameState, me: string, busy: boolean, lastEv
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
+    if (lastEv?.k === 'deal' && view.settings?.shuffleSeats) {
+      setToast(t('seatsShuffled'));
+      clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setToast(null), 2200);
+      return;
+    }
     if (lastEv?.k === 'clear' && view.phase === 'play') {
       const p = view.players.find((x) => x.id === lastEv.p);
       if (p) {

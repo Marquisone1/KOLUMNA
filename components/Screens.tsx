@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
-import type { Action, GameState } from '../game/types';
+import type { Action, GameState, ViewPolicy } from '../game/types';
+import { DEFAULT_SETTINGS } from '../game/types';
 import { MAX_PLAYERS, TARGET_OPTIONS } from '../game/types';
 import { normalizeCode } from '../net/transport';
 import { dict, useI18n, type Lang } from '../i18n';
@@ -274,6 +275,8 @@ export function Lobby({ view, code, me, isHost, send }: LobbyProps) {
           </ul>
         </div>
 
+        <LobbySettings view={view} isHost={isHost} send={send} />
+
         <div className="lobby-foot">
           <div className="target">
             <span className="field-label">{t('gameEndsAt')}</span>
@@ -299,5 +302,51 @@ export function Lobby({ view, code, me, isHost, send }: LobbyProps) {
         </div>
       </section>
     </main>
+  );
+}
+
+/** Host-only game settings in the lobby; everyone else sees what is set */
+function LobbySettings({ view, isHost, send }: { view: GameState; isHost: boolean; send: (a: Action) => void }) {
+  const { t } = useI18n();
+  const set = { ...DEFAULT_SETTINGS, ...view.settings };
+  const options: [ViewPolicy, string][] = [['both', t('viewBoth')], ['3d', t('view3dOnly')], ['2d', t('view2dOnly')]];
+  return (
+    <div className="lobby-settings">
+      <span className="field-label">{t('settings')}</span>
+      <div className="setting-row">
+        <span className="setting-name">{t('viewPolicy')}</span>
+        {isHost ? (
+          <div className="seg" role="group" aria-label={t('viewPolicy')}>
+            {options.map(([v, label]) => (
+              <button key={v} type="button" className={set.view === v ? 'is-on' : ''} aria-pressed={set.view === v} onClick={() => send({ a: 'settings', view: v })}>
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <span className="secondary">{options.find(([v]) => v === set.view)?.[1]}</span>
+        )}
+      </div>
+      <div className="setting-row">
+        <span className="setting-text">
+          <span className="setting-name">{t('shuffleSeats')}</span>
+          <span className="setting-hint muted">{t('shuffleSeatsHint')}</span>
+        </span>
+        {isHost ? (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={set.shuffleSeats}
+            aria-label={t('shuffleSeats')}
+            className={'switch' + (set.shuffleSeats ? ' is-on' : '')}
+            onClick={() => send({ a: 'settings', shuffleSeats: !set.shuffleSeats })}
+          >
+            <span />
+          </button>
+        ) : (
+          <span className="secondary">{set.shuffleSeats ? t('on') : t('off')}</span>
+        )}
+      </div>
+    </div>
   );
 }

@@ -18,6 +18,13 @@ npm run dev        # http://localhost:3000
 
 Add `?net=local` to the URL to play across tabs of one browser without any network (useful for testing).
 
+## Lobby settings
+
+The host sets these before the game starts; everyone else sees them:
+
+- **View for everyone**: *2D & 3D* (default, each player switches in the top bar), *3D only* or *2D only*. Devices without WebGL always get 2D.
+- **Shuffle the order every round**: seats are drawn again before every round, which changes who plays after whom. In 3D the players change chairs.
+
 ## 3D table
 
 The game is played in first person at a round table by default (three.js through @react-three/fiber). You see the table from your chair: your own cards in front of you, the others sitting across and beside you, a lamp hanging over the table. With a mouse, move the pointer toward the screen edges to look around (the middle, where your cards are, stays still); on touch screens drag. The view turns back to the table on its own. While you are on the start screen or in the lobby, the 3D table, the room, the fonts and the characters already load in the background; a short loading screen covers the table until everything is in. The **2D / 3D** switch in the top bar changes the view at any time, also mid-game; the choice is remembered. Without WebGL, or if the 3D view fails to start, the 2D table is used. `?view=2d` forces 2D.

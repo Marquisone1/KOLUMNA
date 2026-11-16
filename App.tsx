@@ -44,16 +44,19 @@ export default function App() {
   const { view, lastEv, hovers, status, busy } = useGame(session, animator);
   const webgl = useMemo(() => hasWebGL(), []);
   const [mode, setModeState] = useState<ViewMode>(initialViewMode);
+  // the host may fix the view for everyone in the lobby settings; without WebGL it is 2D regardless
+  const policy = view?.settings?.view ?? 'both';
+  const shown: ViewMode = !webgl || policy === '2d' ? '2d' : policy === '3d' ? '3d' : mode;
   const [notice, setNotice] = useState<string | null>(null);
   const setMode = useCallback((m: ViewMode) => { setModeState(m); saveViewMode(m); }, []);
   // load the 3D table in the background while people are still on the start screen or in the lobby
   useEffect(() => {
-    if (!webgl || mode !== '3d') return;
+    if (!webgl || shown !== '3d') return;
     const start = () => { import('./components/three/preload').then((m) => m.preload3d()); };
     const ric = (window as unknown as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;
     if (ric) ric(start);
     else setTimeout(start, 800);
-  }, [webgl, mode]);
+  }, [webgl, shown]);
   const on3dError = useCallback(() => {
     setModeState('2d');
     setNotice(t('view3dFailed'));
@@ -159,7 +162,7 @@ export default function App() {
     );
   } else {
     body = (
-      <div className={'game' + (mode === '3d' && webgl && view.phase !== 'lobby' ? ' is-3d' : '')}>
+      <div className={'game' + (shown === '3d' && view.phase !== 'lobby' ? ' is-3d' : '')}>
         <header className="topbar topbar-game">
           <Wordmark />
           <button type="button" className="code-chip" onClick={copyInvite} title={t('copyLink')}>
@@ -169,7 +172,7 @@ export default function App() {
           {view.phase !== 'lobby' && <span className="muted round-label">{t('roundN', { n: view.round })}</span>}
           <span className="spacer" />
           <button type="button" className="icon-btn" onClick={() => setRules(true)} aria-label={t('rules')} title={t('rules')}><Icon name="book" /></button>
-          {webgl && (
+          {webgl && policy === 'both' && (
             <div className="seg" role="group" aria-label={t('view')}>
               {(['2d', '3d'] as ViewMode[]).map((m) => (
                 <button key={m} type="button" className={mode === m ? 'is-on' : ''} aria-pressed={mode === m} onClick={() => setMode(m)}>
@@ -188,7 +191,7 @@ export default function App() {
           <Lobby view={view} code={session.code} me={session.pid} isHost={session.isHost} send={send} />
         ) : (
           <>
-            {mode === '3d' && webgl ? (
+            {shown === '3d' ? (
               <ViewBoundary key="3d" onError={on3dError} fallback={null}>
                 <Suspense fallback={<div className="table3d table3d-loading"><span className="spinner spinner-lg" /></div>}>
                   <Table3D view={view} me={session.pid} isHost={session.isHost} busy={busy} lastEv={lastEv} hovers={hovers} send={send} onHover={sendHover} animator={animator} />

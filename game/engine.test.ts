@@ -142,3 +142,36 @@ test('standings ranks lowest total first and shares ties', () => {
   assert.equal(ranked[2].place, 3);
   assert.equal(visibleSum(game.s.players[0]), 0);
 });
+
+test('lobby settings: only the host changes them, only in the lobby; shuffled seats keep everyone', () => {
+  const game = new Game('h');
+  game.addPlayer('h', 'Host');
+  for (const id of ['a', 'b', 'c', 'd']) game.addPlayer(id, id.toUpperCase(), true);
+  assert.deepEqual(game.s.settings, { view: 'both', shuffleSeats: false });
+
+  assert.equal(game.apply('a', { a: 'settings', view: '2d' }).ok, false);
+  assert.equal(game.apply('h', { a: 'settings', view: 'flat' as never }).ok, false);
+  assert.equal(game.apply('h', { a: 'settings', view: '3d' }).ok, true);
+  assert.equal(game.apply('h', { a: 'settings', shuffleSeats: true }).ok, true);
+  assert.deepEqual(game.s.settings, { view: '3d', shuffleSeats: true });
+
+  // A game saved before settings existed still starts
+  delete game.s.settings;
+  assert.equal(game.apply('h', { a: 'settings', shuffleSeats: true }).ok, true);
+  assert.equal(game.s.settings?.view, 'both');
+
+  const before = game.s.players.map((p) => p.id).sort();
+  let changed = false;
+  const first = game.s.players.map((p) => p.id).join();
+  assert.equal(game.apply('h', { a: 'start' }).ok, true);
+  assert.equal(game.apply('h', { a: 'settings', view: '2d' }).ok, false, 'settings are locked once the game runs');
+  assert.deepEqual(game.s.players.map((p) => p.id).sort(), before);
+  // five players: the order after a few deals is very unlikely to stay the same every time
+  for (let i = 0; i < 6 && !changed; i++) {
+    (game as unknown as { deal(): void }).deal();
+    changed = game.s.players.map((p) => p.id).join() !== first;
+    assert.deepEqual(game.s.players.map((p) => p.id).sort(), before);
+    for (const p of game.s.players) assert.equal(p.grid.length, 4);
+  }
+  assert.ok(changed, 'seats were shuffled');
+});

@@ -1,5 +1,5 @@
 import type { Action, Card, Column, GameEvent, GameState, Player, Step } from './types';
-import { MAX_PLAYERS, TARGET_OPTIONS } from './types';
+import { DEFAULT_SETTINGS, MAX_PLAYERS, TARGET_OPTIONS } from './types';
 
 /** 150 cards: −2 ×5, −1 ×10, 0 ×15, 1 to 12 ×10 each */
 export const DECK_SPEC: [number, number][] = [
@@ -60,6 +60,7 @@ export function blankState(hostId: string): GameState {
     phase: 'lobby',
     round: 0,
     target: 100,
+    settings: { ...DEFAULT_SETTINGS },
     hostId,
     players: [],
     deck: [],
@@ -192,6 +193,18 @@ export class Game {
         this.emit({ k: 'presence', p: pid });
         return { ok: true, steps: this.flush() };
       }
+      case 'settings': {
+        if (!isHost || s.phase !== 'lobby') return fail('host');
+        const cur = { ...DEFAULT_SETTINGS, ...s.settings };
+        if (act.view !== undefined) {
+          if (act.view !== 'both' && act.view !== '2d' && act.view !== '3d') return fail('value');
+          cur.view = act.view;
+        }
+        if (act.shuffleSeats !== undefined) cur.shuffleSeats = !!act.shuffleSeats;
+        s.settings = cur;
+        this.emit({ k: 'presence', p: pid });
+        return { ok: true, steps: this.flush() };
+      }
       case 'start': {
         if (!isHost || s.phase !== 'lobby') return fail('host');
         if (s.players.length < 2) return fail('players');
@@ -305,6 +318,8 @@ export class Game {
 
   private deal() {
     const s = this.s;
+    // new seats every round when the host asked for it: the turn order follows the seats
+    if (s.settings?.shuffleSeats) s.players = shuffle(s.players);
     const deck: Card[] = [];
     for (const [v, n] of DECK_SPEC) for (let i = 0; i < n; i++) deck.push({ id: 0, v });
     shuffle(deck);
