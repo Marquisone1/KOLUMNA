@@ -84,11 +84,13 @@ function faceMaterial(v: number | null): THREE.MeshStandardMaterial {
 }
 /** See-through copies of the card faces for the hologram preview; all share one opacity */
 const previewMats = new Map<string, THREE.MeshBasicMaterial>();
-function previewMaterial(v: number | null): THREE.MeshBasicMaterial {
+/** One see-through material per face; `opacity` is the hologram's current level, so a face that is
+ *  needed for the first time while the copy is already shown (a card just swapped in) is not invisible */
+function previewMaterial(v: number | null, opacity: number): THREE.MeshBasicMaterial {
   const key = v === null ? 'back' : 'f' + v;
   let m = previewMats.get(key);
   if (!m) {
-    m = new THREE.MeshBasicMaterial({ map: v === null ? backTexture() : frontTexture(v), transparent: true, opacity: 0, depthWrite: false, toneMapped: false });
+    m = new THREE.MeshBasicMaterial({ map: v === null ? backTexture() : frontTexture(v), transparent: true, opacity, depthWrite: false, toneMapped: false });
     previewMats.set(key, m);
   }
   return m;
@@ -349,7 +351,7 @@ export class TableStage {
     this.previewCards.clear();
     const cols = p.grid.length;
     p.grid.forEach((col, c) => col.forEach((slot, r) => {
-      const m = new THREE.Mesh(geo.card!, previewMaterial(slot.up ? slot.card.v : null));
+      const m = new THREE.Mesh(geo.card!, previewMaterial(slot.up ? slot.card.v : null, this.previewOpacity * 0.8));
       m.position.set((c - (cols - 1) / 2) * PITCH_X, 0, (r - 1) * PITCH_Z);
       m.raycast = noRaycast;
       m.renderOrder = 4;
