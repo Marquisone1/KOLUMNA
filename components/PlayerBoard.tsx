@@ -1,5 +1,5 @@
-import type { CSSProperties } from 'react';
-import type { GameEvent, GameState, Player } from '../game/types';
+import { useRef, type CSSProperties, type PointerEvent } from 'react';
+import type { GameEvent, GameState, PeerHover, Player } from '../game/types';
 import { visibleSum } from '../game/engine';
 import { useI18n } from '../i18n';
 import { Card } from './Card';
@@ -14,13 +14,16 @@ interface Props {
   w: number;
   selectable: (cardId: number, up: boolean) => boolean;
   onCard?: (cardId: number) => void;
+  onHover?: (h: PeerHover | null) => void;
+  hover?: PeerHover;
   lastEv: GameEvent | null;
   isHostView: boolean;
   onBotTakeover?: (id: string) => void;
 }
 
-export function PlayerBoard({ player, view, isMe, w, selectable, onCard, lastEv, isHostView, onBotTakeover }: Props) {
+export function PlayerBoard({ player, view, isMe, w, selectable, onCard, onHover, hover, lastEv, isHostView, onBotTakeover }: Props) {
   const { t } = useI18n();
+  const lastSent = useRef(0);
   const isTurn = view.phase === 'play' && view.players[view.turn]?.id === player.id;
   const progress = Math.min(1, Math.max(0, player.total / view.target));
   const revealing = lastEv?.k === 'reveal';
@@ -28,6 +31,25 @@ export function PlayerBoard({ player, view, isMe, w, selectable, onCard, lastEv,
   const gap = Math.max(4, Math.round(w * 0.1));
   const isFinisher = view.finisher === player.id;
   const done = view.phase === 'setup' && player.setupFlips >= 2;
+
+  const handlePointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    if (!onHover) return;
+    const now = performance.now();
+    if (now - lastSent.current < 40) return;
+    lastSent.current = now;
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    const y = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
+    const cardEl = (e.target as HTMLElement | null)?.closest<HTMLElement>('[data-card]');
+    const card = cardEl?.dataset.card ? Number(cardEl.dataset.card) : null;
+    onHover({ card, x, y });
+  };
+
+  const handlePointerLeave = () => {
+    lastSent.current = 0;
+    onHover?.(null);
+  };
 
   return (
     <section
@@ -52,12 +74,19 @@ export function PlayerBoard({ player, view, isMe, w, selectable, onCard, lastEv,
         </div>
         <span className="target-num tabular">{player.total}<span className="muted">/{view.target}</span></span>
       </div>
-      <div className="grid" key={view.round}>
+      <div
+        className="grid"
+        key={view.round}
+        onPointerMove={isMe ? handlePointerMove : undefined}
+        onPointerLeave={isMe ? handlePointerLeave : undefined}
+      >
         {player.grid.map((col, c) => (
           <div className="col" key={col[0]?.card.id ?? c}>
             {col.map((slot, r) => {
               const can = !!onCard && selectable(slot.card.id, slot.up);
+              const isPeerHover = !isMe && hover?.card === slot.card.id;
               const idx = c * 3 + r;
+              const cls = [showDeal ? 'is-dealt' : '', isPeerHover ? 'is-peer-hover' : ''].filter(Boolean).join(' ');
               return (
                 <Card
                   key={slot.card.id}
@@ -66,10 +95,10 @@ export function PlayerBoard({ player, view, isMe, w, selectable, onCard, lastEv,
                   up={slot.up}
                   w={w}
                   selectable={can}
-                  onClick={onCard ? () => onCard(slot.card.id) : undefined}
+                  onClick={onCard ? () => { onHover?.(null); onCard(slot.card.id); } : undefined}
                   label={slot.up ? String(slot.card.v) : undefined}
                   delay={revealing ? idx * 45 : 0}
-                  className={showDeal ? 'is-dealt' : ''}
+                  className={cls}
                   style={showDeal ? ({ '--deal': (r * 4 + c) * 28 + 'ms' } as CSSProperties) : undefined}
                 />
               );
@@ -77,6 +106,23 @@ export function PlayerBoard({ player, view, isMe, w, selectable, onCard, lastEv,
           </div>
         ))}
         {player.grid.length === 0 && <div className="grid-empty" style={{ '--cw': w + 'px' } as CSSProperties} />}
+        {!isMe && hover && (
+          <div
+            className="peer-cursor"
+            style={{ left: `${hover.x * 100}%`, top: `${hover.y * 100}%` } as CSSProperties}
+            aria-hidden="true"
+          >
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <path
+                d="M3.2 2.2L15.2 7.4L9.7 9.5L7.6 15L3.2 2.2Z"
+                fill="var(--seat)"
+                stroke="#161513"
+                strokeWidth="1.5"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
+        )}
       </div>
       {view.phase === 'setup' && !isMe && (
         <div className="board-foot muted">{done ? <Icon name="check" size={14} /> : <span className="tabular">{player.setupFlips}/2</span>}</div>

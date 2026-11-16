@@ -38,6 +38,14 @@ export function visibleSum(p: Player): number {
   return slots(p).reduce((sum, s) => sum + (s.up && s.card.v !== null ? s.card.v : 0), 0);
 }
 
+export function maxVisibleCard(p: Player): number {
+  let max = -Infinity;
+  for (const s of slots(p)) {
+    if (s.up && s.card.v !== null && s.card.v > max) max = s.card.v;
+  }
+  return max;
+}
+
 export function findSlot(p: Player, cardId: number) {
   for (let c = 0; c < p.grid.length; c++) {
     for (let r = 0; r < p.grid[c].length; r++) {
@@ -68,15 +76,28 @@ export function blankState(hostId: string): GameState {
   };
 }
 
-/** The view one player is allowed to see: no deck order, no face-down values. */
-export function publicView(s: GameState): GameState {
+/** The view one player is allowed to see: no deck order, no face-down values, and no opponent's drawn deck card. */
+export function publicView(s: GameState, forPid?: string): GameState {
   const v: GameState = structuredClone(s);
   v.deckCount = s.deck.length;
   v.deck = [];
   for (const p of v.players) {
     for (const col of p.grid) for (const slot of col) if (!slot.up) slot.card.v = null;
   }
+  const activeId = s.players[s.turn]?.id;
+  if (v.drawn && s.stage === 'deckDrawn' && (!forPid || forPid !== activeId)) {
+    v.drawn = { id: v.drawn.id, v: null };
+  }
   return v;
+}
+
+export function publicStep(step: Step, forPid?: string): Step {
+  const state = publicView(step.state, forPid);
+  let ev = structuredClone(step.ev);
+  if (ev.k === 'draw' && (!forPid || ev.p !== forPid)) {
+    ev = { ...ev, card: { id: ev.card.id, v: null } };
+  }
+  return { ev, state };
 }
 
 type Result = { ok: true; steps: Step[] } | { ok: false; err: string; steps: Step[] };
@@ -302,21 +323,27 @@ export class Game {
     s.drawn = null;
     s.finisher = null;
     s.lastTurns = [];
+    s.starter = null;
     s.result = null;
     this.emit({ k: 'deal' });
   }
 
   private beginPlay() {
     const s = this.s;
-    let idx = s.starter ? s.players.findIndex((p) => p.id === s.starter) : -1;
-    if (idx < 0) {
-      let best = -Infinity;
-      s.players.forEach((p, i) => {
-        const v = visibleSum(p);
-        if (v > best) { best = v; idx = i; }
-      });
-    }
+    let idx = 0;
+    let bestSum = -Infinity;
+    let bestHigh = -Infinity;
+    s.players.forEach((p, i) => {
+      const sum = visibleSum(p);
+      const high = maxVisibleCard(p);
+      if (sum > bestSum || (sum === bestSum && high > bestHigh)) {
+        bestSum = sum;
+        bestHigh = high;
+        idx = i;
+      }
+    });
     s.turn = Math.max(0, idx);
+    s.starter = s.players[s.turn]?.id ?? null;
     s.phase = 'play';
     s.stage = 'choose';
     this.emit({ k: 'start', p: s.players[s.turn].id });
@@ -381,7 +408,6 @@ export class Game {
       p.history.push(scores[p.id]);
     }
     s.result = { round: s.round, finisher: fid, raw, scores, doubled };
-    s.starter = fid;
     s.phase = s.players.some((p) => p.total >= s.target) ? 'gameOver' : 'roundEnd';
     this.emit({ k: 'roundEnd' });
   }

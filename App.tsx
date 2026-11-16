@@ -8,7 +8,7 @@ import { Home, Lobby, LangSwitch, RulesDialog, Wordmark, copyText, inviteLink } 
 import { Table } from './components/Table';
 import { Scoreboard } from './components/Scoreboard';
 import { Icon } from './components/Icon';
-import type { Action } from './game/types';
+import type { Action, PeerHover } from './game/types';
 
 const read = (k: string) => { try { return localStorage.getItem(k) ?? ''; } catch { return ''; } };
 const write = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } };
@@ -35,7 +35,7 @@ export default function App() {
   const [rules, setRules] = useState(false);
   const [sound, setSoundState] = useState(soundOn());
   const [copied, setCopied] = useState(false);
-  const { view, lastEv, status, busy } = useGame(session);
+  const { view, lastEv, hovers, status, busy } = useGame(session);
   const hadView = useRef(false);
   if (view) hadView.current = true;
 
@@ -102,6 +102,7 @@ export default function App() {
   }, [session, view, t]);
 
   const send = useCallback((a: Action) => session?.send(a), [session]);
+  const sendHover = useCallback((h: PeerHover | null) => session?.sendHover(h), [session]);
   const toggleSound = () => { setSound(!sound); setSoundState(!sound); };
   const copyInvite = async () => {
     if (session && (await copyText(inviteLink(session.code)))) {
@@ -154,7 +155,7 @@ export default function App() {
           <Lobby view={view} code={session.code} me={session.pid} isHost={session.isHost} send={send} />
         ) : (
           <>
-            <Table view={view} me={session.pid} isHost={session.isHost} busy={busy} lastEv={lastEv} send={send} />
+            <Table view={view} me={session.pid} isHost={session.isHost} busy={busy} lastEv={lastEv} hovers={hovers} send={send} onHover={sendHover} />
             {(view.phase === 'roundEnd' || view.phase === 'gameOver') && !busy && (
               <Scoreboard key={view.round} view={view} me={session.pid} isHost={session.isHost} send={send} onLeave={leave} />
             )}

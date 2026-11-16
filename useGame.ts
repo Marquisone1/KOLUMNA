@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import type { GameEvent, GameState, Step } from './game/types';
+import type { GameEvent, GameState, PeerHover, Step } from './game/types';
 import type { Session } from './net/session';
 import { afterDelay, animateBefore, commitSound, measureCards, playLayoutShift, restoreHidden } from './anim';
 
@@ -13,6 +13,7 @@ const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 export function useGame(session: Session | null) {
   const [view, setView] = useState<GameState | null>(null);
   const [lastEv, setLastEv] = useState<GameEvent | null>(null);
+  const [hovers, setHovers] = useState<Record<string, PeerHover>>({});
   const [status, setStatus] = useState(session?.status ?? 'closed');
   const [busy, setBusy] = useState(false);
   const queue = useRef<Step[]>([]);
@@ -24,6 +25,7 @@ export function useGame(session: Session | null) {
     if (!session) return;
     setStatus(session.status);
     const offStatus = session.onStatus(() => setStatus(session.status));
+    const offHovers = session.onHovers((h) => setHovers(h));
     const offSteps = session.onSteps((steps) => {
       queue.current.push(...steps);
       pump();
@@ -32,6 +34,7 @@ export function useGame(session: Session | null) {
       if (running.current) return;
       running.current = true;
       setBusy(true);
+      await Promise.resolve();
       while (queue.current.length && alive.current) {
         const step = queue.current.shift()!;
         // Catch up without animation when far behind or when the tab is in the background
@@ -39,16 +42,23 @@ export function useGame(session: Session | null) {
         try {
           if (!skip) await animateBefore(step.ev, session!.pid);
         } catch { /* an animation must never block the game */ }
+        if (!alive.current) break;
         const before = skip ? null : measureCards();
-        flushSync(() => {
+        if (skip) {
           setView(step.state);
           setLastEv(step.ev);
-        });
+        } else {
+          flushSync(() => {
+            setView(step.state);
+            setLastEv(step.ev);
+          });
+        }
         restoreHidden();
         if (!skip) {
           if (before && step.ev.k !== 'deal') playLayoutShift(before);
           commitSound(step.ev);
-          await wait(afterDelay(step.ev));
+          const d = afterDelay(step.ev, step.state);
+          if (d > 0) await wait(d);
         }
       }
       running.current = false;
@@ -57,9 +67,10 @@ export function useGame(session: Session | null) {
     return () => {
       alive.current = false;
       offStatus();
+      offHovers();
       offSteps();
     };
   }, [session]);
 
-  return { view, lastEv, status, busy };
+  return { view, lastEv, hovers, status, busy };
 }

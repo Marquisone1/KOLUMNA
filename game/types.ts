@@ -104,5 +104,11 @@ export type Action =
   | { a: 'botTakeover'; id: string }
   | { a: 'target'; value: number };
 
+export interface PeerHover {
+  card: number | null;
+  x: number;
+  y: number;
+}
+
 export const MAX_PLAYERS = 6;
 export const TARGET_OPTIONS = [50, 100, 150];

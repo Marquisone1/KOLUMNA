@@ -1,11 +1,11 @@
-import { Game, publicView } from '../game/engine';
+import { findSlot, Game, publicStep, publicView } from '../game/engine';
 import { botMove } from '../game/bot';
-import type { Action, Step } from '../game/types';
+import type { Action, PeerHover, Step } from '../game/types';
 import { hostRoom, joinRoom, makeRoomCode, type Conn, type HostTransport, type NetError } from './transport';
 
 // Wire protocol
-//   client → host: { t: 'hello', pid, name } | { t: 'act', act }
-//   host → client: { t: 'welcome', pid } | { t: 'steps', steps } | { t: 'reject', reason } | { t: 'error', err }
+//   client → host: { t: 'hello', pid, name } | { t: 'act', act } | { t: 'hover', hover }
+//   host → client: { t: 'welcome', pid } | { t: 'steps', steps } | { t: 'hover', pid, hover } | { t: 'reject', reason } | { t: 'error', err }
 
 export type SessionStatus = 'connecting' | 'open' | 'lost' | 'rejected' | 'closed';
 export type RejectReason = 'full' | 'started' | 'not-found' | 'network' | 'timeout';
@@ -17,7 +17,9 @@ export interface Session {
   status: SessionStatus;
   reason?: RejectReason;
   send(act: Action): void;
+  sendHover(hover: PeerHover | null): void;
   onSteps(cb: (steps: Step[]) => void): () => void;
+  onHovers(cb: (hovers: Record<string, PeerHover>) => void): () => void;
   onStatus(cb: () => void): () => void;
   close(): void;
 }
@@ -58,6 +60,8 @@ abstract class Base {
   reason?: RejectReason;
   protected stepCbs = new Set<(s: Step[]) => void>();
   protected statusCbs = new Set<() => void>();
+  protected hoverCbs = new Set<(h: Record<string, PeerHover>) => void>();
+  protected hovers: Record<string, PeerHover> = {};
   /** Latest public state, replayed to late subscribers */
   protected latest: Step['state'] | null = null;
   onSteps(cb: (s: Step[]) => void) {
@@ -65,11 +69,23 @@ abstract class Base {
     if (this.latest) cb([{ ev: { k: 'sync' }, state: this.latest }]);
     return () => { this.stepCbs.delete(cb); };
   }
+  onHovers(cb: (h: Record<string, PeerHover>) => void) {
+    this.hoverCbs.add(cb);
+    cb({ ...this.hovers });
+    return () => { this.hoverCbs.delete(cb); };
+  }
   onStatus(cb: () => void) { this.statusCbs.add(cb); return () => { this.statusCbs.delete(cb); }; }
   protected setStatus(s: SessionStatus, reason?: RejectReason) {
     this.status = s;
     this.reason = reason;
     this.statusCbs.forEach((cb) => cb());
+  }
+  protected setHover(pid: string, hover: PeerHover | null) {
+    if (!pid) return;
+    if (hover) this.hovers[pid] = hover;
+    else delete this.hovers[pid];
+    const snap = { ...this.hovers };
+    this.hoverCbs.forEach((cb) => cb(snap));
   }
   protected deliver(steps: Step[]) {
     if (!steps.length) return;
@@ -118,7 +134,7 @@ export class HostSession extends Base implements Session {
         rememberId(code, this.pid);
         this.transport.onConnection((c) => this.accept(c));
         this.setStatus('open');
-        this.deliver([{ ev: { k: 'sync' }, state: publicView(this.game.s) }]);
+        this.deliver([{ ev: { k: 'sync' }, state: publicView(this.game.s, this.pid) }]);
         this.save();
         this.scheduleBots();
         return;
@@ -139,7 +155,10 @@ export class HostSession extends Base implements Session {
     c.onClose(() => {
       const pid = this.conns.get(c);
       this.conns.delete(c);
-      if (pid && ![...this.conns.values()].includes(pid)) this.broadcast(this.game.setConnected(pid, false));
+      if (pid) {
+        this.relayHover(pid, null);
+        if (![...this.conns.values()].includes(pid)) this.broadcast(this.game.setConnected(pid, false));
+      }
     });
   }
 
@@ -153,7 +172,7 @@ export class HostSession extends Base implements Session {
         this.conns.set(c, pid);
         c.send({ t: 'welcome', pid });
         this.broadcast(this.game.setConnected(pid, true));
-        c.send({ t: 'steps', steps: [{ ev: { k: 'sync' }, state: publicView(this.game.s) }] });
+        c.send({ t: 'steps', steps: [{ ev: { k: 'sync' }, state: publicView(this.game.s, pid) }] });
         return;
       }
       pid = uid('p-');
@@ -165,7 +184,7 @@ export class HostSession extends Base implements Session {
       }
       this.conns.set(c, pid);
       c.send({ t: 'welcome', pid });
-      c.send({ t: 'steps', steps: [{ ev: { k: 'sync' }, state: publicView(this.game.s) }] });
+      c.send({ t: 'steps', steps: [{ ev: { k: 'sync' }, state: publicView(this.game.s, pid) }] });
       this.broadcast(res.steps, c);
       return;
     }
@@ -173,6 +192,19 @@ export class HostSession extends Base implements Session {
       const pid = this.conns.get(c);
       if (!pid) return;
       this.run(pid, msg.act as Action, c);
+      return;
+    }
+    if (msg.t === 'hover') {
+      const pid = this.conns.get(c);
+      if (!pid) return;
+      this.relayHover(pid, (msg.hover as PeerHover | null) ?? null, c);
+    }
+  }
+
+  private relayHover(pid: string, hover: PeerHover | null, skip?: Conn) {
+    this.setHover(pid, hover);
+    for (const [c, cPid] of this.conns) {
+      if (cPid && c !== skip) c.send({ t: 'hover', pid, hover });
     }
   }
 
@@ -186,13 +218,21 @@ export class HostSession extends Base implements Session {
     this.run(this.pid, act);
   }
 
-  /** Send steps to every client (each gets the public view) and to the host's own UI */
+  sendHover(hover: PeerHover | null) {
+    this.relayHover(this.pid, hover);
+  }
+
+  /** Send steps to every client (each gets its own public view) and to the host's own UI */
   private broadcast(steps: Step[], skip?: Conn) {
     if (!steps.length) return;
-    const pub = steps.map((s) => ({ ev: s.ev, state: publicView(s.state) }));
-    this.lastSteps = pub;
-    for (const [c, pid] of this.conns) if (pid && c !== skip) c.send({ t: 'steps', steps: pub });
-    this.deliver(pub);
+    const hostPub = steps.map((s) => publicStep(s, this.pid));
+    this.lastSteps = hostPub;
+    for (const [c, pid] of this.conns) {
+      if (pid && c !== skip) {
+        c.send({ t: 'steps', steps: steps.map((s) => publicStep(s, pid)) });
+      }
+    }
+    this.deliver(hostPub);
     this.save();
     this.scheduleBots();
   }
@@ -206,8 +246,12 @@ export class HostSession extends Base implements Session {
   }
 
   private scheduleBots() {
-    if (this.botTimer) clearTimeout(this.botTimer);
     const s = this.game.s;
+    if (s.phase === 'setup' && this.botTimer) return;
+    if (this.botTimer) {
+      clearTimeout(this.botTimer);
+      this.botTimer = null;
+    }
     // Give clients time to play the animations for the steps they just received
     const animMs = this.lastSteps.length * 520;
     let actor: string | null = null;
@@ -215,11 +259,35 @@ export class HostSession extends Base implements Session {
     else if (s.phase === 'play' && s.players[s.turn]?.bot) actor = s.players[s.turn].id;
     if (!actor) return;
     const id = actor;
-    const delay = (s.phase === 'setup' ? 450 : 750) + animMs + Math.random() * 350;
+    const isDeal = this.lastSteps.some((x) => x.ev.k === 'deal');
+    const delay = s.phase === 'setup'
+      ? (isDeal ? 600 : 220) + Math.random() * 200
+      : 750 + animMs + Math.random() * 350;
     this.botTimer = setTimeout(() => {
-      this.botTimer = null;
-      const move = botMove(publicView(this.game.s), id);
-      if (move) this.run(id, move);
+      const move = botMove(publicView(this.game.s, id), id);
+      if (!move) {
+        this.botTimer = null;
+        return;
+      }
+      const botPlayer = this.game.player(id);
+      const targetCard = move.a === 'flip' || move.a === 'swap' ? move.card : null;
+      const hit = targetCard !== null && botPlayer ? findSlot(botPlayer, targetCard) : null;
+      if (hit && botPlayer && targetCard !== null) {
+        const cols = Math.max(1, botPlayer.grid.length);
+        this.relayHover(id, {
+          card: targetCard,
+          x: (hit.c + 0.55) / cols,
+          y: (hit.r + 0.55) / 3,
+        });
+        this.botTimer = setTimeout(() => {
+          this.botTimer = null;
+          this.relayHover(id, null);
+          this.run(id, move);
+        }, 260);
+      } else {
+        this.botTimer = null;
+        this.run(id, move);
+      }
     }, delay);
   }
 
@@ -276,6 +344,8 @@ export class ClientSession extends Base implements Session {
       this.setStatus('open');
     } else if (m.t === 'steps') {
       this.deliver(m.steps as Step[]);
+    } else if (m.t === 'hover') {
+      this.setHover(String(m.pid ?? ''), (m.hover as PeerHover | null) ?? null);
     } else if (m.t === 'reject') {
       this.setStatus('rejected', m.reason);
     }
@@ -283,6 +353,10 @@ export class ClientSession extends Base implements Session {
 
   send(act: Action) {
     this.conn?.send({ t: 'act', act });
+  }
+
+  sendHover(hover: PeerHover | null) {
+    this.conn?.send({ t: 'hover', hover });
   }
 
   close() {

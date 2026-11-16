@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import type { Action, GameEvent, GameState } from '../game/types';
+import type { Action, GameEvent, GameState, PeerHover } from '../game/types';
 import { useI18n } from '../i18n';
 import { Card, EmptySlot } from './Card';
 import { PlayerBoard } from './PlayerBoard';
@@ -11,10 +11,12 @@ interface Props {
   isHost: boolean;
   busy: boolean;
   lastEv: GameEvent | null;
+  hovers?: Record<string, PeerHover>;
   send: (a: Action) => void;
+  onHover?: (h: PeerHover | null) => void;
 }
 
-export function Table({ view, me, isHost, busy, lastEv, send }: Props) {
+export function Table({ view, me, isHost, busy, lastEv, hovers, send, onHover }: Props) {
   const { t } = useI18n();
   const { w: vw, h: vh } = useViewport();
   const meIdx = view.players.findIndex((p) => p.id === me);
@@ -53,16 +55,29 @@ export function Table({ view, me, isHost, busy, lastEv, send }: Props) {
 
   const stage = view.stage;
   const canAct = !busy;
+  const [pendingSetup, setPendingSetup] = useState<number[]>([]);
+  useEffect(() => {
+    if (view.phase !== 'setup') setPendingSetup([]);
+  }, [view.phase, view.round]);
+
   const selectable = (cardId: number, up: boolean) => {
-    if (!canAct || !mine) return false;
-    if (view.phase === 'setup') return !up && mine.setupFlips < 2;
-    if (!myTurn) return false;
+    if (!mine) return false;
+    if (view.phase === 'setup') {
+      if (up || pendingSetup.includes(cardId)) return false;
+      const flippedIds = new Set(mine.grid.flat().filter((s) => s.up).map((s) => s.card.id));
+      const inFlight = pendingSetup.filter((id) => !flippedIds.has(id)).length;
+      return mine.setupFlips + inFlight < 2;
+    }
+    if (!canAct || !myTurn) return false;
     if (stage === 'deckDrawn' || stage === 'discardTaken') return true;
     if (stage === 'mustFlip') return !up;
     return false;
   };
   const onMyCard = (cardId: number) => {
-    if (view.phase === 'setup') return send({ a: 'flip', card: cardId });
+    if (view.phase === 'setup') {
+      setPendingSetup((prev) => (prev.includes(cardId) ? prev : [...prev, cardId]));
+      return send({ a: 'flip', card: cardId });
+    }
     if (stage === 'mustFlip') return send({ a: 'flip', card: cardId });
     send({ a: 'swap', card: cardId });
   };
@@ -125,6 +140,7 @@ export function Table({ view, me, isHost, busy, lastEv, send }: Props) {
             w={oppW}
             selectable={() => false}
             lastEv={lastEv}
+            hover={hovers?.[p.id]}
             isHostView={isHost}
             onBotTakeover={(id) => send({ a: 'botTakeover', id })}
           />
@@ -170,7 +186,7 @@ export function Table({ view, me, isHost, busy, lastEv, send }: Props) {
           <div className={'pile pile-hand' + (view.drawn ? ' has-card' : '')}>
             <div className="hand" style={{ '--cw': pileW + 'px' } as CSSProperties} data-anchor="hand">
               {view.drawn
-                ? <Card id={view.drawn.id} v={view.drawn.v} up w={pileW} className="is-held" />
+                ? <Card id={view.drawn.id} v={view.drawn.v} up={view.drawn.v !== null} w={pileW} className="is-held" />
                 : <EmptySlot w={pileW} />}
             </div>
             <span className="pile-label">
@@ -200,6 +216,7 @@ export function Table({ view, me, isHost, busy, lastEv, send }: Props) {
             w={myW}
             selectable={selectable}
             onCard={onMyCard}
+            onHover={onHover}
             lastEv={lastEv}
             isHostView={isHost}
           />

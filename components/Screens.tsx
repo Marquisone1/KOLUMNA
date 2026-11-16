@@ -194,11 +194,6 @@ export function Home({ initialName, initialCode, error, pending, onCreate, onJoi
               <Card key={i} v={v} up w={132} className="fan-card" style={{ '--rot': rot + 'deg', '--dy': dy + 'px', '--i': i } as CSSProperties} />
             ))}
           </div>
-          <div className="fan-column">
-            <Card v={9} up w={64} />
-            <Card v={9} up w={64} />
-            <Card v={9} up w={64} />
-          </div>
         </div>
       </main>
     </div>

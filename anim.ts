@@ -1,6 +1,6 @@
 import { cardElement } from './components/Card';
 import { sfx } from './audio';
-import type { GameEvent } from './game/types';
+import type { GameEvent, GameState } from './game/types';
 
 // Card flights: a temporary card travels from one place on the table to another
 // while the real state is still the old one. The state commits when it lands.
@@ -86,7 +86,8 @@ export async function animateBefore(ev: GameEvent, myId: string) {
   switch (ev.k) {
     case 'draw': {
       sfx.slide();
-      await fly({ from: anchor('deck'), to: anchor('hand'), v: ev.card.v, upFrom: false, upTo: true });
+      const showUp = ev.p === myId && ev.card.v !== null;
+      await fly({ from: anchor('deck'), to: anchor('hand'), v: ev.card.v, upFrom: false, upTo: showUp });
       break;
     }
     case 'take': {
@@ -100,8 +101,9 @@ export async function animateBefore(ev: GameEvent, myId: string) {
     case 'swap': {
       const src = cardEl(ev.card.id);
       const target = cardEl(ev.out.id);
+      const srcWasUp = src ? src.classList.contains('is-up') : true;
       const outgoing = fly({ from: target, to: anchor('discard'), v: ev.out.v, upFrom: ev.wasUp, upTo: true, duration: 560, lift: 1.12 });
-      const incoming = fly({ from: src, to: target, v: ev.card.v, upFrom: true, upTo: true, duration: 520, delay: 90 });
+      const incoming = fly({ from: src, to: target, v: ev.card.v, upFrom: srcWasUp, upTo: true, duration: 520, delay: 90 });
       hide(src);
       hide(target);
       setTimeout(() => sfx.place(), 380);
@@ -110,7 +112,8 @@ export async function animateBefore(ev: GameEvent, myId: string) {
     }
     case 'toss': {
       const src = cardEl(ev.card.id);
-      const flight = fly({ from: src, to: anchor('discard'), v: ev.card.v, upFrom: true, upTo: true });
+      const srcWasUp = src ? src.classList.contains('is-up') : true;
+      const flight = fly({ from: src, to: anchor('discard'), v: ev.card.v, upFrom: srcWasUp, upTo: true });
       hide(src);
       setTimeout(() => sfx.place(), 320);
       await flight;
@@ -144,12 +147,14 @@ export async function animateBefore(ev: GameEvent, myId: string) {
 }
 
 /** Pause after a commit so CSS transitions (flips, deal-in) can finish */
-export function afterDelay(ev: GameEvent): number {
+export function afterDelay(ev: GameEvent, state?: GameState): number {
   if (reduced()) return 60;
   switch (ev.k) {
-    case 'flip': return 440;
+    case 'flip':
+      if (state?.phase === 'setup' && !state.players.every((p) => p.setupFlips >= 2)) return 0;
+      return 440;
     case 'reveal': return 1100;
-    case 'deal': return 900;
+    case 'deal': return 0;
     case 'finish': return 500;
     case 'clear': return 260;
     case 'start': return 200;
