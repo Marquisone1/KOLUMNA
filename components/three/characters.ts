@@ -473,14 +473,15 @@ export function spawnExtra(path: string, mode: 'stand' | 'sit', neckHeight = 4.3
     });
     mixer.update(0);
     turn.updateMatrixWorld(true);
+    // measure the seated hips at scale 1, before the figure goes into its scaled wrapper
+    const hips = bone('hips');
+    const hp = hips ? hips.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3();
     const wrap = new THREE.Group();
     wrap.add(turn);
     wrap.scale.setScalar(s);
     if (mode === 'stand') {
       wrap.position.y = -footY * s;
     } else {
-      const hips = bone('hips');
-      const hp = hips ? hips.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3();
       wrap.position.set(-hp.x * s, -hp.y * s + 0.25 * s, -hp.z * s);
     }
     group.add(wrap);

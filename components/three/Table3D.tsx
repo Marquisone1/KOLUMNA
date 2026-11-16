@@ -245,6 +245,9 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
     const hit = pick(e);
     const card = hit && 'card' in hit ? hit.card : null;
     const pile = hit && 'pile' in hit && pileActive(hit.pile) ? hit.pile : null;
+    // hovering someone else's grid shows it beside yours, readable
+    const hoveredId = (e.object.userData as { cardId?: number }).cardId;
+    stage.setPreview(hoveredId !== undefined ? stage.ownerOf(hoveredId) : null);
     if (stage.hovered !== card || stage.pileHover !== pile) {
       stage.hovered = card;
       stage.pileHover = pile;
@@ -257,12 +260,19 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
   const onOut = () => {
     clearHover();
     reportHover(null);
+    stage.setPreview(null);
   };
   const onClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     if (look.current.dragging || e.delta > 8) return;
     const hit = pick(e);
-    if (!hit) return;
+    if (!hit) {
+      // on touch screens there is no hover: a tap on someone else's grid shows or hides the copy
+      const id = (e.object.userData as { cardId?: number }).cardId;
+      const owner = id !== undefined ? stage.ownerOf(id) : null;
+      if (owner && owner !== me) stage.togglePreview(owner);
+      return;
+    }
     if ('card' in hit) {
       reportHover(null);
       clearHover();

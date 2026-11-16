@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { GameState } from '../../game/types';
 import { SEAT_COLORS } from '../PlayerBoard';
 import { backTexture, CARD_H, CARD_W, frontTexture, leatherTexture, woodTexture } from './textures';
-import { CARD_T, GRID_D, GRID_W, PILE_SCALE, opponentHandPose, slotPose, type Layout, type Pose } from './layout';
+import { CARD_T, GRID_D, GRID_W, PILE_SCALE, PITCH_X, PITCH_Z, opponentHandPose, slotPose, type Layout, type Pose } from './layout';
 
 // The card scene. Every card on the table is one object keyed by its id.
 // `sync` derives where each card belongs from the game state; a card whose place changed
@@ -82,6 +82,18 @@ function faceMaterial(v: number | null): THREE.MeshStandardMaterial {
   }
   return m;
 }
+/** See-through copies of the card faces for the hologram preview; all share one opacity */
+const previewMats = new Map<string, THREE.MeshBasicMaterial>();
+function previewMaterial(v: number | null): THREE.MeshBasicMaterial {
+  const key = v === null ? 'back' : 'f' + v;
+  let m = previewMats.get(key);
+  if (!m) {
+    m = new THREE.MeshBasicMaterial({ map: v === null ? backTexture() : frontTexture(v), transparent: true, opacity: 0, depthWrite: false, toneMapped: false });
+    previewMats.set(key, m);
+  }
+  return m;
+}
+
 function edgeMaterials(): THREE.Material[] {
   let hidden = materials.get('edge-hidden');
   let side = materials.get('edge');
@@ -231,6 +243,19 @@ export class TableStage {
   canvas: HTMLElement | null = null;
   /** The last state shown, for tests and debugging */
   view: GameState | null = null;
+  /** which player each card on a grid belongs to */
+  private owners = new Map<number, string>();
+  private me = '';
+  // hologram preview of another player's grid, read the right way up, beside yours
+  private preview = new THREE.Group();
+  private previewCards = new THREE.Group();
+  private previewPanel: THREE.Mesh;
+  private previewPanelMat: THREE.MeshBasicMaterial;
+  private previewLabel: THREE.Mesh;
+  private previewOf: string | null = null;
+  private previewKey = '';
+  private previewOpacity = 0;
+  private previewHideAt = 0;
 
   takeNextSync(): SyncOptions {
     const o = this.nextSync ?? {};
@@ -271,8 +296,90 @@ export class TableStage {
     this.turntable.add(this.deckMesh, this.deckRing, this.discardMark, this.discardRing);
 
     this.tossLabelMesh = this.buildButton();
-    this.root.add(this.matGroup, this.turntable, this.toss);
+    this.previewPanelMat = new THREE.MeshBasicMaterial({ color: '#13202a', transparent: true, opacity: 0, depthWrite: false, toneMapped: false });
+    this.previewPanel = new THREE.Mesh(new THREE.ShapeGeometry(roundedRectShape(GRID_W + 0.5, GRID_D + 1.0, 0.22), 5).rotateX(-Math.PI / 2), this.previewPanelMat);
+    this.previewPanel.position.set(0, -0.01, -0.22);
+    this.previewLabel = new THREE.Mesh(new THREE.PlaneGeometry(GRID_W, 0.42).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, toneMapped: false }));
+    this.previewLabel.position.set(0, 0, -GRID_D / 2 - 0.45);
+    for (const m of [this.previewPanel, this.previewLabel]) { m.raycast = noRaycast; m.renderOrder = 3; }
+    this.preview.add(this.previewPanel, this.previewCards, this.previewLabel);
+    this.preview.visible = false;
+    this.root.add(this.matGroup, this.turntable, this.toss, this.preview);
   }
+
+  // ---------- hologram preview ----------
+
+  /** Whose grid a card belongs to, if it lies on a grid */
+  ownerOf(cardId: number) {
+    return this.owners.get(cardId) ?? null;
+  }
+
+  /**
+   * Show another player's grid beside yours, turned so you read it upright, slightly see-through.
+   * `null` hides it after a short grace period, so moving between their cards does not flicker.
+   */
+  setPreview(playerId: string | null) {
+    if (playerId === this.me) playerId = null;
+    if (playerId) {
+      this.previewHideAt = 0;
+      if (playerId !== this.previewOf) {
+        this.previewOf = playerId;
+        this.previewKey = '';
+        this.rebuildPreview();
+      }
+    } else if (this.previewOf && !this.previewHideAt) {
+      this.previewHideAt = performance.now() + 220;
+    }
+    this.invalidate();
+  }
+
+  togglePreview(playerId: string) {
+    if (this.previewOf === playerId && !this.previewHideAt) this.setPreview(null);
+    else this.setPreview(playerId);
+  }
+
+  private rebuildPreview() {
+    const L = this.layout;
+    const v = this.view;
+    const p = v?.players.find((x) => x.id === this.previewOf);
+    if (!L || !p) return;
+    const key = p.grid.map((col) => col.map((s) => s.card.id + ':' + (s.up ? s.card.v : 'x')).join(',')).join('|');
+    if (key === this.previewKey) return;
+    this.previewKey = key;
+    this.previewCards.clear();
+    const cols = p.grid.length;
+    p.grid.forEach((col, c) => col.forEach((slot, r) => {
+      const m = new THREE.Mesh(geo.card!, previewMaterial(slot.up ? slot.card.v : null));
+      m.position.set((c - (cols - 1) / 2) * PITCH_X, 0, (r - 1) * PITCH_Z);
+      m.raycast = noRaycast;
+      m.renderOrder = 4;
+      this.previewCards.add(m);
+    }));
+    // their name above the copy
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 72;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#efe9de';
+    ctx.font = "600 40px 'Instrument Sans', system-ui, sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(p.name, 256, 38);
+    const lm = this.previewLabel.material as THREE.MeshBasicMaterial;
+    lm.map?.dispose();
+    lm.map = new THREE.CanvasTexture(canvas);
+    lm.map.colorSpace = THREE.SRGBColorSpace;
+    lm.needsUpdate = true;
+    // place it beside your own grid (above it on narrow screens), tipped toward your eyes
+    const mine = L.seats.find((s) => s && s.angle === 0) ?? L.seats[0];
+    const ps = 0.82;
+    this.preview.scale.setScalar(ps);
+    if (L.portrait) this.preview.position.set(0, 1.4, mine.z - GRID_D * 1.05);
+    else this.preview.position.set(-(GRID_W / 2 + 0.45 + (GRID_W * ps) / 2), 0.9, mine.z - 0.15);
+    const toEye = L.eye.clone().sub(this.preview.position);
+    this.preview.rotation.set(Math.atan2(toEye.z, toEye.y) * 0.8, 0, 0);
+  }
+
 
   /** A walnut lazy susan with a leather top and a brass rim, on a dark bearing */
   private buildTurntable() {
@@ -456,12 +563,15 @@ export class TableStage {
     const L = this.layout!;
     const out = new Map<number, { pose: Pose; v: number | null; order: number; pile: number }>();
     this.slots.clear();
+    this.owners.clear();
+    this.me = me;
     view.players.forEach((p, pi) => {
       const seat = L.seats[pi];
       if (!seat) return;
       const cols = p.grid.length;
       p.grid.forEach((col, c) => col.forEach((slot, r) => {
         out.set(slot.card.id, { pose: slotPose(seat, cols, c, r, slot.up), v: slot.card.v, order: (r * 4 + c) * view.players.length + pi, pile: -1 });
+        this.owners.set(slot.card.id, p.id);
         if (p.id === me) this.slots.set(slot.card.id, { owner: p.id, c, r, cols });
       }));
     });
@@ -524,6 +634,7 @@ export class TableStage {
     if (opts.instant) this.deckHeight = this.deckGoal;
     const top = view.discard[view.discard.length - 1];
     this.topDiscard = top ? top.id : null;
+    if (this.previewOf) this.rebuildPreview();
     this.refreshInteractive();
     this.invalidate();
   }
@@ -772,6 +883,24 @@ export class TableStage {
       this.tossLacquer?.color.copy(TableStage.CAP_OFF).lerp(TableStage.CAP_ON, lit);
       active = true;
     }
+    // hologram fades in and out
+    if (this.previewHideAt && now >= this.previewHideAt) {
+      this.previewHideAt = 0;
+      this.previewOf = null;
+    }
+    const pGoal = this.previewOf ? 1 : 0;
+    if (Math.abs(this.previewOpacity - pGoal) > 1e-3) {
+      this.previewOpacity += (pGoal - this.previewOpacity) * (1 - Math.exp(-dt * 12));
+      if (Math.abs(this.previewOpacity - pGoal) <= 1e-3) this.previewOpacity = pGoal;
+      const o = this.previewOpacity;
+      previewMats.forEach((m) => { m.opacity = o * 0.8; });
+      this.previewPanelMat.opacity = o * 0.42;
+      (this.previewLabel.material as THREE.MeshBasicMaterial).opacity = o * 0.9;
+      this.preview.visible = o > 0.01;
+      this.preview.position.y += 0;
+      active = true;
+    }
+    if (this.previewHideAt) active = true;
     this.mats.forEach((m) => {
       if (Math.abs(m.mat.opacity - m.goal) > 1e-3) {
         m.mat.opacity += (m.goal - m.mat.opacity) * k;
