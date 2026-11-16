@@ -613,8 +613,18 @@ export class TableStage {
     homes.forEach((h, id) => {
       let obj = this.cards.get(id);
       if (!obj) {
-        obj = this.take(id, opts.instant ? h.pose : this.deckTop());
+        // a new card normally comes off the deck; one that turns up under the top of the discard pile
+        // was lying there all along (only the top few are drawn), so it simply appears in place
+        const underneath = h.pile >= 0 && h.pile < this.discardIds.length - 1;
+        obj = this.take(id, opts.instant || underneath ? h.pose : this.deckTop());
         this.cards.set(id, obj);
+        if (underneath) {
+          obj.pile = h.pile;
+          obj.target = { ...h.pose };
+          obj.setValue(h.v);
+          obj.apply();
+          return;
+        }
       }
       obj.setValue(h.v);
       obj.pile = h.pile;
