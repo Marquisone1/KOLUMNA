@@ -15,6 +15,7 @@ import { computeLayout, type Layout } from './layout';
 import { feltTexture, leatherTexture, loadCardFonts, redrawCards, setAnisotropy, woodTexture } from './textures';
 import { DEFAULT_ROOM, ROOMS, type RoomId } from './rooms';
 import { threeAnimator } from './animator3d';
+import { FeltBounce, LampHaze, PostEffects, QualityWatch, initialQuality, qualityForced, type Quality } from './Graphics';
 
 interface Props {
   view: GameState;
@@ -55,6 +56,8 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
   const overlay = useRef<Overlay>({ plates: new Map(), deck: null });
   const look = useRef<Look>({ yaw: 0, pitch: 0, dragging: false });
   const invalidateRef = useRef<() => void>(() => {});
+  // graphics quality: decided once from the device, stepped down if frames stay slow
+  const [quality, setQuality] = useState<Quality | null>(null);
 
   // This table plays the steps while it is mounted
   useLayoutEffect(() => {
@@ -73,6 +76,7 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
     if (!el) return;
     const read = () => setSize({ w: el.clientWidth, h: el.clientHeight });
     read();
+    setQuality((q) => q ?? initialQuality(el.clientWidth));
     const ro = new ResizeObserver(read);
     ro.observe(el);
     return () => ro.disconnect();
@@ -251,7 +255,7 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
           shadows="percentage"
           dpr={[1, Math.min(typeof devicePixelRatio === 'number' ? devicePixelRatio : 1, size.w < 700 ? 1.5 : 1.75)]}
           frameloop="demand"
-          gl={{ antialias: true, powerPreference: 'high-performance', alpha: false }}
+          gl={{ antialias: quality !== 'high', powerPreference: 'high-performance', alpha: false }}
           camera={{ fov: layout.camera.fov, near: 0.2, far: 200, position: layout.camera.pos.toArray() as [number, number, number] }}
           onCreated={({ gl, scene }) => {
             gl.toneMapping = THREE.NeutralToneMapping;
@@ -265,6 +269,10 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
           <CameraRig layout={layout} look={look} invalidateRef={invalidateRef} />
           <Reflections />
           <TableAndLamp layout={layout} mobile={size.w < 700} />
+          <FeltBounce radius={layout.table.r} />
+          {quality === 'high' && <LampHaze lampY={13} radius={layout.table.r} />}
+          {quality === 'high' && <PostEffects />}
+          {quality === 'high' && !qualityForced() && <QualityWatch onSlow={() => setQuality('normal')} />}
           <Suspense fallback={null}>
             <RoomView id={room} tableRadius={layout.table.r} mobile={size.w < 700} />
           </Suspense>
@@ -492,6 +500,7 @@ function TableAndLamp({ layout, mobile }: { layout: Layout; mobile: boolean }) {
     Object.values(tex).forEach((t) => t.dispose());
   }, [mats, tex]);
   const shadowSize = mobile ? 1024 : 2048;
+  // the lamp is close to the felt, so a wider PCF kernel reads as the soft edge of a real bulb
   return (
     <group>
       <hemisphereLight args={['#fff0dc', '#2a1a10', 0.08]} />

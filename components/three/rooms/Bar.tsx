@@ -573,11 +573,12 @@ function Posters() {
     return new THREE.MeshStandardMaterial({ map: t, roughness: 0.75 });
   }), []);
   useEffect(() => () => mats.forEach((m) => { m.map?.dispose(); m.dispose(); }), [mats]);
+  // between the wall sconces (z = −6 and 18 on both side walls), clear of the dartboard (z = −26)
   const spots: { pos: [number, number, number]; rot: number }[] = [
-    { pos: [-SIDE_X + 0.4, 9, -6], rot: Math.PI / 2 },
-    { pos: [-SIDE_X + 0.4, 9, 6], rot: Math.PI / 2 },
-    { pos: [SIDE_X - 0.4, 9, -2], rot: -Math.PI / 2 },
-    { pos: [SIDE_X - 0.4, 9, 10], rot: -Math.PI / 2 },
+    { pos: [-SIDE_X + 0.6, 8.5, 2], rot: Math.PI / 2 },
+    { pos: [-SIDE_X + 0.6, 8.5, 10], rot: Math.PI / 2 },
+    { pos: [SIDE_X - 0.6, 8.5, 2], rot: -Math.PI / 2 },
+    { pos: [SIDE_X - 0.6, 8.5, 10], rot: -Math.PI / 2 },
   ];
   return (
     <group>

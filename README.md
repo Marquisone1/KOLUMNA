@@ -28,6 +28,7 @@ The game is played in first person at a round table by default (three.js through
 - When you hold a card drawn from the deck, the red **Discard** button in its brass bezel rises out of the table next to your cards.
 - Card faces, backs, felt and wood are drawn on canvases at runtime; there are no image files.
 - Every step from the engine is played as animate → commit → wait for the cards to land, for both views (`Animator` in `anim.ts`).
+- Graphics come in two levels. **High** (desktops) adds ground-truth ambient occlusion, SMAA, the lamp's cone in the room's haze and softer shadows; **normal** (phones) skips those. Both get a soft bounce of green light from the felt. If frames stay slow, high steps down to normal by itself. `?gfx=high` or `?gfx=low` sets the level and keeps it.
 - Phones: the pixel ratio is capped at 1.5, there is one shadow-casting lamp with a 1024 px shadow map, and frames are only rendered while something moves.
 
 ### Characters
