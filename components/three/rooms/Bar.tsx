@@ -168,20 +168,21 @@ function Counter({ mats }: { mats: Mats }) {
   );
 }
 
+/** A brass beer tower: a column from the counter, a crossbar, three spouts and their handles */
 function Taps({ x, mats }: { x: number; mats: Mats }) {
   return (
     <group position={[x, COUNTER_TOP, -0.8]}>
-      <Box size={[5, 0.6, 1.2]} pos={[0, 2.6, 0]} mat={mats.brass} />
-      {[-1.6, 0, 1.6].map((dx) => (
-        <group key={dx} position={[dx, 0, 0]}>
-          <mesh position={[0, 1.3, 0]} material={mats.brass}>
-            <cylinderGeometry args={[0.18, 0.22, 2.6, 10]} />
-          </mesh>
-          <mesh position={[0, 3.6, 0.1]} material={mats.wainscot}>
-            <cylinderGeometry args={[0.2, 0.26, 1.6, 10]} />
-          </mesh>
+      <mesh position={[0, 1.2, 0]} material={mats.brass}><cylinderGeometry args={[0.3, 0.38, 2.4, 14]} /></mesh>
+      <mesh position={[0, 2.4, 0]} rotation-z={Math.PI / 2} material={mats.brass}><cylinderGeometry args={[0.26, 0.26, 3.8, 14]} /></mesh>
+      {[-1.5, 0, 1.5].map((dx) => (
+        <group key={dx} position={[dx, 2.4, 0]}>
+          {/* spout toward the guest side, handle on top */}
+          <mesh position={[0, -0.35, 0.35]} material={mats.brass}><cylinderGeometry args={[0.09, 0.07, 0.6, 8]} /></mesh>
+          <mesh position={[0, 0.85, 0]} material={mats.wainscot}><cylinderGeometry args={[0.13, 0.19, 1.4, 10]} /></mesh>
         </group>
       ))}
+      {/* drip tray */}
+      <mesh position={[0, 0.06, 0.6]} material={mats.iron}><boxGeometry args={[4.4, 0.12, 1.2]} /></mesh>
     </group>
   );
 }
@@ -225,8 +226,9 @@ function BackBar({ mats, mobile }: { mats: Mats; mobile: boolean }) {
     shelves.forEach((y) => {
       for (let k = 0; k < per; k++) {
         const x = -L / 2 + 2 + (k + rnd() * 0.4) * ((L - 4) / per);
-        const s = 0.8 + rnd() * 0.45;
-        m.compose(new THREE.Vector3(x, y + 0.2, z + 1.4 + rnd() * 0.5), q, new THREE.Vector3(s, s * (0.85 + rnd() * 0.3), s));
+        // shelves are 4.2 apart; the tallest bottle (3.7 × 1 × 1.05) still clears the board above
+        const s = 0.75 + rnd() * 0.25;
+        m.compose(new THREE.Vector3(x, y + 0.13, z + 1.4 + rnd() * 0.5), q, new THREE.Vector3(s, s * (0.9 + rnd() * 0.15), s));
         mesh.setMatrixAt(i, m);
         mesh.setColorAt(i, c.set(colors[Math.floor(rnd() * colors.length)]));
         i++;
@@ -485,10 +487,11 @@ function StringLights({ mobile }: { mobile: boolean }) {
   );
 }
 
-/** A pennant garland in the card colours along the back bar */
+/** A pennant garland in the card colours across the room */
 function Bunting() {
   const flags = useMemo(() => {
-    const pts = sag(new THREE.Vector3(-26, 20.6, BACK_Z + 1.2), new THREE.Vector3(26, 20.6, BACK_Z + 1.2), 1.6, 26);
+    // across the room between two ceiling beams, clear of the sign over the back bar
+    const pts = sag(new THREE.Vector3(-SIDE_X + 0.5, 19.4, -19.5), new THREE.Vector3(SIDE_X - 0.5, 19.4, -19.5), 2.2, 40);
     const tri = new THREE.BufferGeometry();
     tri.setAttribute('position', new THREE.Float32BufferAttribute([-0.85, 0, 0, 0.85, 0, 0, 0, -1.7, 0], 3));
     tri.computeVertexNormals();
@@ -728,11 +731,11 @@ function People({ mobile }: { mobile: boolean }) {
   const { invalidate } = useThree();
   const extras = useMemo<{ e: Extra; pos: [number, number, number]; rot: number; every: number; clips: string[] }[]>(() => {
     const list = [
-      // the bartender stands on the raised duckboard behind the counter, facing the room
-      { e: spawnExtra('characters/Rogue.glb', 'stand'), pos: [4, FLOOR + 6.6, COUNTER_Z - 9] as [number, number, number], rot: Math.PI, every: 7, clips: ['Interact', 'Use_Item'] },
-      { e: spawnExtra('characters/Knight.glb', 'sit'), pos: [-12, 0.65, COUNTER_Z + 3.2] as [number, number, number], rot: 0.15, every: 11, clips: ['Cheer', 'Interact'] },
+      // the bartender stands on a raised duckboard behind the counter (hidden by it), facing the room
+      { e: spawnExtra('characters/Rogue.glb', 'stand'), pos: [4, FLOOR + 9.4, COUNTER_Z - 9] as [number, number, number], rot: Math.PI, every: 7, clips: ['Interact', 'Use_Item'] },
+      { e: spawnExtra('characters/Knight.glb', 'sit'), pos: [-12, 1.35, COUNTER_Z + 3.4] as [number, number, number], rot: 0.15, every: 11, clips: ['Cheer', 'Interact'] },
     ];
-    if (!mobile) list.push({ e: spawnExtra('characters/Mage.glb', 'sit'), pos: [12, 0.65, COUNTER_Z + 3.2], rot: -0.2, every: 13, clips: ['Use_Item', 'Interact'] });
+    if (!mobile) list.push({ e: spawnExtra('characters/Mage.glb', 'sit'), pos: [12, 1.35, COUNTER_Z + 3.4], rot: -0.2, every: 13, clips: ['Use_Item', 'Interact'] });
     return list;
   }, [mobile]);
   const timers = useMemo(() => extras.map((x, i) => x.every * (0.3 + i * 0.25)), [extras]);
@@ -893,7 +896,7 @@ function PoolTable({ mobile, mats }: { mobile: boolean; mats: Mats }) {
           </mesh>
         </group>
       </group>
-      <group position={[x - wid / 2 - rail - 1.6, FLOOR, z - 0.7]} rotation-y={-Math.PI / 2}>
+      <group position={[x - wid / 2 - rail - 1.6, FLOOR, z - 1.5]} rotation-y={-Math.PI / 2}>
         <primitive object={player.group} />
       </group>
       {/* a long billiard lamp over the table, two bulbs under an enamel shade */}

@@ -370,6 +370,8 @@ function CameraRig({ layout, look, invalidateRef }: { layout: Layout; look: RefO
     invalidate();
   }, [layout, camera, invalidate, invalidateRef]);
   useFrame((_, dt) => {
+    // development only: tests can park the camera anywhere in the room
+    if ((window as unknown as { __freeCam?: boolean }).__freeCam) return;
     const L = look.current;
     if (!L.dragging) {
       // the head turns back to the table by itself
@@ -486,7 +488,8 @@ function TableAndLamp({ layout, mobile }: { layout: Layout; mobile: boolean }) {
     return { top, rail, apron, inlay };
   }, [r]);
   const mats = useMemo(() => ({
-    felt: new THREE.MeshStandardMaterial({ map: tex.felt, roughness: 0.97, envMapIntensity: 0.2 }),
+    // shadowSide: the top must block the lamp's light for what lies under the table (rug, floor)
+    felt: new THREE.MeshStandardMaterial({ map: tex.felt, roughness: 0.97, envMapIntensity: 0.2, shadowSide: THREE.DoubleSide }),
     rail: new THREE.MeshStandardMaterial({ map: tex.leather, roughness: 0.48, envMapIntensity: 0.7 }),
     wood: new THREE.MeshStandardMaterial({ map: tex.wood, roughness: 0.4, envMapIntensity: 0.9 }),
     brass: new THREE.MeshStandardMaterial({ color: '#c9a063', roughness: 0.3, metalness: 1, envMapIntensity: 1.1 }),
