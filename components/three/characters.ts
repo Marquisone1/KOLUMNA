@@ -427,7 +427,7 @@ export interface Extra {
  * A character standing (feet at the group's origin) or seated (hips at the group's origin),
  * facing the group's −Z, at the same size as the players. Loads in the background.
  */
-export function spawnExtra(path: string, mode: 'stand' | 'sit'): Extra {
+export function spawnExtra(path: string, mode: 'stand' | 'sit', neckHeight = 4.3): Extra {
   const group = new THREE.Group();
   let mixer: THREE.AnimationMixer | null = null;
   const gestures = new Map<string, THREE.AnimationAction>();
@@ -445,7 +445,7 @@ export function spawnExtra(path: string, mode: 'stand' | 'sit'): Extra {
     const feet = ['foot.l', 'foot.r'].map(bone).filter(Boolean) as THREE.Object3D[];
     const footY = feet.length ? Math.min(...feet.map((f) => f.getWorldPosition(new THREE.Vector3()).y)) : 0;
     const neck = head ? head.getWorldPosition(new THREE.Vector3()).y - footY : 1;
-    const s = 4.3 / Math.max(0.01, neck);
+    const s = neckHeight / Math.max(0.01, neck);
     mixer = new THREE.AnimationMixer(scene);
     const clipName = mode === 'stand' ? 'Idle' : SEATED_CLIP;
     const clip = model.animations.find((c) => c.name === clipName);

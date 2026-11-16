@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { spawnExtra, type Extra } from '../characters';
 import * as THREE from 'three';
@@ -78,6 +78,7 @@ export default function Bar({ mobile, tableRadius }: RoomProps) {
       <Chalkboard />
       <Jukebox mobile={mobile} mats={mats} />
       <People mobile={mobile} />
+      <PoolTable mobile={mobile} mats={mats} />
       {/* the room itself stays dim: only a faint bounce from the warm walls */}
       <hemisphereLight args={['#ffe6c4', '#2a1a10', 0.06]} />
       {/* pendants over the counter: lit shades, one soft light on the counter top */}
@@ -392,7 +393,8 @@ function SideWalls({ mats }: { mats: Mats }) {
       ))}
       {/* the dartboard on the left wall, near the bar */}
       <group position={[-SIDE_X + 0.4, 8, -26]} rotation-y={Math.PI / 2}>
-        <mesh material={mats.wainscot} position={[0, 0, -0.1]}><cylinderGeometry args={[3.2, 3.2, 0.3, 32]} /></mesh>
+        {/* the cork backing stands upright against the wall: its axis points into the room */}
+        <mesh material={mats.wainscot} position={[0, 0, -0.1]} rotation-x={Math.PI / 2}><cylinderGeometry args={[3.2, 3.2, 0.3, 32]} /></mesh>
         <mesh material={dart} position={[0, 0, 0.1]}><circleGeometry args={[2.6, 48]} /></mesh>
       </group>
     </group>
@@ -403,7 +405,7 @@ function SideWalls({ mats }: { mats: Mats }) {
 function SideTables({ mats }: { mats: Mats }) {
   return (
     <group>
-      {[[-30, 18], [31, 14]].map(([x, z]) => (
+      {[[-30, 18], [31, 22]].map(([x, z]) => (
         <group key={x} position={[x, 0, z]}>
           <mesh position={[0, -0.25, 0]} material={mats.top} castShadow receiveShadow>
             <cylinderGeometry args={[4, 4, 0.5, 40]} />
@@ -753,6 +755,160 @@ function People({ mobile }: { mobile: boolean }) {
           <primitive object={x.e.group} />
         </group>
       ))}
+    </group>
+  );
+}
+
+// ---------- pool ----------
+
+// a little lower than a real table: the regulars here are small, stylised folk
+const POOL = { x: 28, z: -6, len: 22, wid: 11, top: FLOOR + 5.4, rail: 1.1 };
+const BALL_R = 0.29;
+const BALL_COLORS = ['#f2c12e', '#2f55b8', '#d93a2b', '#6a3d9a', '#ef7d22', '#2f8f4e', '#7a2a22', '#1b1b1b', '#f2c12e', '#2f55b8', '#d93a2b'];
+
+/**
+ * A pool table along the right wall with a regular playing on it. He lines up, the cue goes back
+ * and forward, the white ball rolls into a coloured one, which runs on into the side pocket.
+ * Then he chalks his cue and a new ball is set up. All on the wall clock, in a loop.
+ */
+function PoolTable({ mobile, mats }: { mobile: boolean; mats: Mats }) {
+  const { invalidate } = useThree();
+  const parts = useMemo(() => {
+    const cloth = new THREE.MeshStandardMaterial({ color: '#2b6a9e', roughness: 0.95 });
+    const cushion = new THREE.MeshStandardMaterial({ color: '#245a87', roughness: 0.9 });
+    const pocket = new THREE.MeshStandardMaterial({ color: '#0b0908', roughness: 1 });
+    const ivory = new THREE.MeshStandardMaterial({ color: '#f4efe4', roughness: 0.25, envMapIntensity: 1 });
+    const cueWood = new THREE.MeshStandardMaterial({ color: '#d8b07a', roughness: 0.45 });
+    const cueButt = new THREE.MeshStandardMaterial({ color: '#2a1a10', roughness: 0.4 });
+    const balls = BALL_COLORS.map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.22, envMapIntensity: 1 }));
+    const ballGeo = new THREE.SphereGeometry(BALL_R, 20, 14);
+    return { cloth, cushion, pocket, ivory, cueWood, cueButt, balls, ballGeo };
+  }, []);
+  useEffect(() => () => {
+    const { balls, ballGeo, ...rest } = parts;
+    balls.forEach((m) => m.dispose());
+    ballGeo.dispose();
+    Object.values(rest).forEach((m) => m.dispose());
+  }, [parts]);
+
+  // table frame: long axis along z
+  const { x, z, len, wid, top, rail } = POOL;
+  const y = top + BALL_R;
+  // the shot: white ball, coloured ball, middle pocket on the far long side (toward the wall)
+  const cueStart = new THREE.Vector3(x - 3.4, y, z);
+  const objStart = new THREE.Vector3(x + 0.6, y, z);
+  const pocket = new THREE.Vector3(x + wid / 2 + 0.15, y, z);
+
+  const cueBall = useRef<THREE.Mesh>(null);
+  const objBall = useRef<THREE.Mesh>(null);
+  const cue = useRef<THREE.Group>(null);
+  const player = useMemo(() => spawnExtra('characters/Barbarian.glb', 'stand', 6.6), []);
+  const clock = useRef({ t: 0, colour: 0, played: false, chalked: false });
+
+  useFrame((_, dt) => {
+    const d = Math.min(dt, 0.25);
+    player.update(d);
+    const c = clock.current;
+    c.t += d;
+    const T = 10;
+    if (c.t > T) {
+      c.t -= T;
+      c.played = false;
+      c.chalked = false;
+      c.colour = (c.colour + 1) % parts.balls.length;
+      if (objBall.current) objBall.current.material = parts.balls[c.colour];
+    }
+    const t = c.t;
+    // 0–1.6 s aim, 1.6–2.2 s back swing, 2.2–2.35 s strike
+    let back = 0;
+    if (t > 1.6 && t < 2.2) back = ((t - 1.6) / 0.6) * 1.0;
+    else if (t >= 2.2 && t < 2.35) back = 1.0 * (1 - (t - 2.2) / 0.15) - 0.25 * ((t - 2.2) / 0.15);
+    else if (t >= 2.35 && t < 3.2) back = -0.25;
+    if (t > 1.5 && !c.played) { c.played = true; player.gesture('Interact'); }
+    if (t > 6.5 && !c.chalked) { c.chalked = true; player.gesture('Use_Item'); }
+    if (cue.current) cue.current.position.x = -back;
+    // ball motion after the strike, easing out as they lose speed
+    const ease = (u: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, u)), 2);
+    if (cueBall.current && objBall.current) {
+      const s1 = ease((t - 2.35) / 0.5);
+      cueBall.current.position.lerpVectors(cueStart, objStart.clone().setX(objStart.x - BALL_R * 2), s1);
+      const s2 = ease((t - 2.8) / 1.1);
+      objBall.current.position.lerpVectors(objStart, pocket, s2);
+      // the coloured ball drops into the pocket, then a new one is set down before the next shot
+      const sink = Math.min(1, Math.max(0, (t - 3.9) / 0.3));
+      objBall.current.position.y = y - sink * 0.9;
+      objBall.current.visible = t < 4.3 || t > 8.5;
+      if (t > 8.5) objBall.current.position.copy(objStart);
+      // the white ball is placed back on its spot while he chalks
+      if (t > 7.5) cueBall.current.position.copy(cueStart);
+      const roll = (s1 * 4 * Math.PI);
+      cueBall.current.rotation.z = -roll;
+      objBall.current.rotation.z = -s2 * 6 * Math.PI;
+    }
+    invalidate();
+  });
+
+  const pocketsAt: [number, number][] = [[-1, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [1, 1]];
+  // the regular stands on the near long side, facing the wall (+x); the cue runs along +x to the white ball
+  return (
+    <group>
+      {/* body and legs */}
+      <Box size={[wid + rail * 2, 1.4, len + rail * 2]} pos={[x, top - 0.9, z]} mat={mats.wood} shadow />
+      {[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz]) => (
+        <mesh key={`${sx}${sz}`} position={[x + sx * (wid / 2 + 0.2), (FLOOR + top - 1.6) / 2, z + sz * (len / 2 + 0.2)]} material={mats.wood} castShadow>
+          <cylinderGeometry args={[0.55, 0.75, top - 1.6 - FLOOR, 12]} />
+        </mesh>
+      ))}
+      {/* cloth, cushions, rails with brass corners */}
+      <mesh position={[x, top, z]} rotation-x={-Math.PI / 2} material={parts.cloth} receiveShadow>
+        <planeGeometry args={[wid, len]} />
+      </mesh>
+      {[-1, 1].map((sx) => <Box key={'cx' + sx} size={[0.4, 0.35, len]} pos={[x + sx * (wid / 2 - 0.2), top + 0.17, z]} mat={parts.cushion} />)}
+      {[-1, 1].map((sz) => <Box key={'cz' + sz} size={[wid, 0.35, 0.4]} pos={[x, top + 0.17, z + sz * (len / 2 - 0.2)]} mat={parts.cushion} />)}
+      {[-1, 1].map((sx) => <Box key={'rx' + sx} size={[rail, 0.5, len + rail * 2]} pos={[x + sx * (wid / 2 + rail / 2), top + 0.1, z]} mat={mats.top} shadow />)}
+      {[-1, 1].map((sz) => <Box key={'rz' + sz} size={[wid, 0.5, rail]} pos={[x, top + 0.1, z + sz * (len / 2 + rail / 2)]} mat={mats.top} shadow />)}
+      {pocketsAt.map(([sx, sz]) => (
+        <group key={`p${sx}${sz}`} position={[x + sx * (wid / 2 + 0.1), top + 0.36, z + sz * (len / 2 + 0.1)]}>
+          <mesh material={parts.pocket}><cylinderGeometry args={[0.55, 0.45, 0.2, 20]} /></mesh>
+          {sz !== 0 && <mesh position={[0, 0.02, 0]} material={mats.brass}><torusGeometry args={[0.62, 0.08, 6, 20, Math.PI]} /></mesh>}
+        </group>
+      ))}
+      {/* a few balls left on the table, the white one and the one he is playing */}
+      {[[x - 2.5, z - 6], [x + 3, z - 8.2], [x - 1.2, z + 5.5], [x + 2.2, z + 7.4], [x + 3.8, z + 2.6]].map(([bx, bz], i) => (
+        <mesh key={'b' + i} position={[bx, y, bz]} geometry={parts.ballGeo} material={parts.balls[(i * 3 + 1) % parts.balls.length]} castShadow />
+      ))}
+      <mesh ref={cueBall} position={cueStart} geometry={parts.ballGeo} material={parts.ivory} castShadow />
+      <mesh ref={objBall} position={objStart} geometry={parts.ballGeo} material={parts.balls[0]} castShadow />
+      {/* the cue: its tip rests just behind the white ball, the butt rises toward his hands */}
+      <group position={[cueStart.x - BALL_R - 0.15, y + 0.05, z]} rotation-z={-0.12}>
+        <group ref={cue}>
+          <mesh position={[-3.05, 0, 0]} rotation-z={Math.PI / 2} material={parts.cueWood} castShadow>
+            <cylinderGeometry args={[0.05, 0.08, 5.9, 10]} />
+          </mesh>
+          <mesh position={[-7.5, 0, 0]} rotation-z={Math.PI / 2} material={parts.cueButt} castShadow>
+            <cylinderGeometry args={[0.08, 0.12, 3.0, 10]} />
+          </mesh>
+          <mesh position={[-0.05, 0, 0]} rotation-z={Math.PI / 2} material={parts.ivory}>
+            <cylinderGeometry args={[0.05, 0.05, 0.1, 10]} />
+          </mesh>
+        </group>
+      </group>
+      <group position={[x - wid / 2 - rail - 1.6, FLOOR, z - 0.7]} rotation-y={-Math.PI / 2}>
+        <primitive object={player.group} />
+      </group>
+      {/* a long billiard lamp over the table, two bulbs under an enamel shade */}
+      <group position={[x, top + 9, z]}>
+        <Box size={[2.2, 1.0, 12]} pos={[0, 0, 0]} mat={mats.shade} />
+        {[-3, 3].map((dz) => (
+          <mesh key={dz} position={[0, -0.45, dz]} material={mats.bulb}><sphereGeometry args={[0.36, 12, 8]} /></mesh>
+        ))}
+        {[-5, 5].map((dz) => (
+          <mesh key={'c' + dz} position={[0, (CEIL - top - 9) / 2 + 0.5, dz]} material={mats.iron}>
+            <cylinderGeometry args={[0.03, 0.03, CEIL - top - 9, 6]} />
+          </mesh>
+        ))}
+        {!mobile && <pointLight position={[0, -1.2, 0]} intensity={18} distance={16} decay={1.6} color="#ffe2b8" />}
+      </group>
     </group>
   );
 }

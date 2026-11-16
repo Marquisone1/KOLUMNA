@@ -22,7 +22,7 @@ Add `?net=local` to the URL to play across tabs of one browser without any netwo
 
 The game is played in first person at a round table by default (three.js through @react-three/fiber). You see the table from your chair: your own cards in front of you, the others sitting across and beside you, a lamp hanging over the table. Drag to look around; your view turns back to the table when you let go. The **2D / 3D** switch in the top bar changes the view at any time, also mid-game; the choice is remembered. Without WebGL, or if the 3D view fails to start, the 2D table is used. `?view=2d` forces 2D.
 
-- The game takes place in a **bar** around the table: counter with a bartender and two regulars, back bar with bottles, chalkboard, jukebox, a rug under the table. The lamp over the card table is the main light; the rest of the room is lit indirectly. Rooms are separate modules in `components/three/rooms/`; more can be added there and picked by id.
+- The game takes place in a **bar** around the table: counter with a bartender and two regulars, back bar with bottles, chalkboard, jukebox, dartboard, a pool table with a regular playing on it, a rug under the table. The lamp over the card table is the main light; the rest of the room is lit indirectly. Rooms are separate modules in `components/three/rooms/`; more can be added there and picked by id.
 - Opponents' cards and the piles are drawn a little larger than yours so they read across the table; they lie the way their owner sees them, as on a real table.
 - Deck and discard pile sit on a **turntable** in the middle of the table that turns to face whoever's turn it is.
 - When you hold a card drawn from the deck, the red **Discard** button in its brass bezel rises out of the table next to your cards.
