@@ -4,6 +4,7 @@ import { spawnExtra, type Extra } from '../characters';
 import * as THREE from 'three';
 import { leatherTexture, plankTexture, signTexture, wallpaperTexture, woodTexture } from '../textures';
 import type { RoomProps } from './types';
+import { useBackdrop } from './backdrop';
 
 // A neighbourhood bar around the card table: plank floor and a round rug under the table,
 // wainscoted walls, a long counter with a brass foot rail, a mirrored back bar with lit shelves,
@@ -27,6 +28,7 @@ function useDispose(objs: { dispose: () => void }[]) {
 // ---------- room ----------
 
 export default function Bar({ mobile, tableRadius }: RoomProps) {
+  useBackdrop('#120d0a', [55, 140]);
   const tex = useMemo(() => {
     const floor = plankTexture();
     const wall = wallpaperTexture('#1f5562');

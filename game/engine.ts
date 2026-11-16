@@ -1,5 +1,5 @@
 import type { Action, Card, Column, GameEvent, GameState, Player, Step } from './types';
-import { DEFAULT_SETTINGS, MAX_PLAYERS, TARGET_OPTIONS } from './types';
+import { DEFAULT_SETTINGS, MAX_PLAYERS, ROOM_IDS, TARGET_OPTIONS } from './types';
 
 /** 150 cards: −2 ×5, −1 ×10, 0 ×15, 1 to 12 ×10 each */
 export const DECK_SPEC: [number, number][] = [
@@ -201,6 +201,10 @@ export class Game {
           cur.view = act.view;
         }
         if (act.shuffleSeats !== undefined) cur.shuffleSeats = !!act.shuffleSeats;
+        if (act.room !== undefined) {
+          if (!ROOM_IDS.includes(act.room)) return fail('value');
+          cur.room = act.room;
+        }
         s.settings = cur;
         this.emit({ k: 'presence', p: pid });
         return { ok: true, steps: this.flush() };

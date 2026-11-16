@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import type { Action, GameState, ViewPolicy } from '../game/types';
-import { DEFAULT_SETTINGS } from '../game/types';
+import { DEFAULT_SETTINGS, ROOM_IDS } from '../game/types';
 import { MAX_PLAYERS, TARGET_OPTIONS } from '../game/types';
 import { normalizeCode } from '../net/transport';
 import { dict, useI18n, type Lang } from '../i18n';
@@ -327,6 +327,22 @@ function LobbySettings({ view, isHost, send }: { view: GameState; isHost: boolea
           <span className="secondary">{options.find(([v]) => v === set.view)?.[1]}</span>
         )}
       </div>
+      {set.view !== '2d' && (
+        <div className="setting-row">
+          <span className="setting-name">{t('room')}</span>
+          {isHost ? (
+            <div className="seg" role="group" aria-label={t('room')}>
+              {ROOM_IDS.map((r) => (
+                <button key={r} type="button" className={set.room === r ? 'is-on' : ''} aria-pressed={set.room === r} onClick={() => send({ a: 'settings', room: r })}>
+                  {t(`room.${r}`)}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <span className="secondary">{t(`room.${set.room}`)}</span>
+          )}
+        </div>
+      )}
       <div className="setting-row">
         <span className="setting-text">
           <span className="setting-name">{t('shuffleSeats')}</span>

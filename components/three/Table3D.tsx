@@ -11,7 +11,7 @@ import { SEAT_COLORS } from '../PlayerBoard';
 import { Icon } from '../Icon';
 import { TableStage, TT_H, stageRef } from './stage';
 import { Characters } from './characters';
-import { computeLayout, type Layout } from './layout';
+import { computeLayout, sitterPoint, type Layout } from './layout';
 import { feltTexture, leatherTexture, loadCardFonts, redrawCards, setAnisotropy, woodTexture } from './textures';
 import { DEFAULT_ROOM, ROOMS, type RoomId } from './rooms';
 import { threeAnimator } from './animator3d';
@@ -100,6 +100,17 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
     () => computeLayout(n, m.meIdx, Math.round(aspect * 50) / 50, (HUD_TOP / Math.max(1, size.h)) * 2, (HUD_BOTTOM / Math.max(1, size.h)) * 2),
     [n, m.meIdx, aspect, size.h],
   );
+  // how far out the chairs stand, for rooms that need to build under them; rounded so it rarely changes
+  const reach = useMemo(
+    () => Math.ceil(Math.max(layout.table.r + 6, ...layout.seats.map((s) => sitterPoint(s).length() + 3))),
+    [layout],
+  );
+  // the room the host picked; ?world=… overrides it (handy for a quick look)
+  const place: RoomId = useMemo(() => {
+    const w = new URLSearchParams(location.search).get('world');
+    if (w && w in ROOMS) return w as RoomId;
+    return room in ROOMS ? room : DEFAULT_ROOM;
+  }, [room]);
 
   // Layout changes (resize, players joining) move everything into place at once
   const seatKey = view.players.map((p) => p.id + p.seat).join();
@@ -300,7 +311,7 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
           dpr={[1, Math.min(typeof devicePixelRatio === 'number' ? devicePixelRatio : 1, size.w < 700 ? 1.5 : 1.75)]}
           frameloop="demand"
           gl={{ antialias: quality !== 'high', powerPreference: 'high-performance', alpha: false }}
-          camera={{ fov: layout.camera.fov, near: 0.2, far: 200, position: layout.camera.pos.toArray() as [number, number, number] }}
+          camera={{ fov: layout.camera.fov, near: 0.2, far: 420, position: layout.camera.pos.toArray() as [number, number, number] }}
           onCreated={({ gl, scene }) => {
             gl.toneMapping = THREE.NeutralToneMapping;
             gl.toneMappingExposure = 1.05;
@@ -312,13 +323,13 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
         >
           <CameraRig layout={layout} look={look} invalidateRef={invalidateRef} />
           <Reflections />
-          <TableAndLamp layout={layout} mobile={size.w < 700} />
+          <TableAndLamp layout={layout} mobile={size.w < 700} cord={place !== 'space'} />
           <FeltBounce radius={layout.table.r} />
           {quality === 'high' && <LampHaze lampY={13} radius={layout.table.r} />}
           {quality === 'high' && <PostEffects />}
           {quality === 'high' && !qualityForced() && <QualityWatch onSlow={() => setQuality('normal')} />}
           <Suspense fallback={null}>
-            <RoomView id={room} tableRadius={layout.table.r} mobile={size.w < 700} />
+            <RoomView id={place} tableRadius={layout.table.r} reach={reach} mobile={size.w < 700} />
           </Suspense>
           <StageDriver stage={stage} chars={chars} />
           <primitive object={chars.root} />
@@ -413,9 +424,9 @@ function FirstFrames({ onDone }: { onDone: () => void }) {
   return null;
 }
 
-function RoomView({ id, tableRadius, mobile }: { id: RoomId; tableRadius: number; mobile: boolean }) {
+function RoomView({ id, tableRadius, reach, mobile }: { id: RoomId; tableRadius: number; reach: number; mobile: boolean }) {
   const Room = ROOMS[id].component;
-  return <Room tableRadius={tableRadius} mobile={mobile} />;
+  return <Room tableRadius={tableRadius} reach={reach} mobile={mobile} />;
 }
 
 /** The camera is your eyes: fixed at your seat, turned by dragging, easing back to the table */
@@ -521,7 +532,7 @@ function OverlayDriver({ overlay, chars, layout, stage }: { overlay: RefObject<O
 }
 
 /** The card table: felt top, brass inlay, a padded leather armrest, a turned pedestal; and the lamp over it */
-function TableAndLamp({ layout, mobile }: { layout: Layout; mobile: boolean }) {
+function TableAndLamp({ layout, mobile, cord }: { layout: Layout; mobile: boolean; cord: boolean }) {
   const r = layout.table.r;
   const tex = useMemo(() => {
     const felt = feltTexture();
@@ -593,7 +604,7 @@ function TableAndLamp({ layout, mobile }: { layout: Layout; mobile: boolean }) {
         shadow-camera-far={lampH + 9}
       />
       <primitive object={lampTarget} />
-      <Lamp y={lampH} />
+      <Lamp y={lampH} cord={cord} />
 
       <mesh geometry={parts.top} material={mats.felt} receiveShadow castShadow />
       <mesh geometry={parts.inlay} material={mats.brass} />
@@ -615,8 +626,8 @@ function TableAndLamp({ layout, mobile }: { layout: Layout; mobile: boolean }) {
   );
 }
 
-/** A plain pendant: cord, dark enamel shade with a brass band, the bulb inside it */
-function Lamp({ y }: { y: number }) {
+/** A plain pendant: cord, dark enamel shade with a brass band, the bulb inside it (in space it simply floats) */
+function Lamp({ y, cord }: { y: number; cord: boolean }) {
   const parts = useMemo(() => {
     const pts = [new THREE.Vector2(0.35, 1.7), new THREE.Vector2(0.62, 1.55), new THREE.Vector2(1.7, 0.6), new THREE.Vector2(2.7, 0.05), new THREE.Vector2(2.72, 0)];
     return { shade: new THREE.LatheGeometry(pts, 64), band: new THREE.TorusGeometry(2.71, 0.05, 8, 64).rotateX(Math.PI / 2) };
@@ -624,7 +635,7 @@ function Lamp({ y }: { y: number }) {
   useEffect(() => () => { parts.shade.dispose(); parts.band.dispose(); }, [parts]);
   return (
     <group position={[0, y, 0]}>
-      <mesh position={[0, 6, 0]}>
+      <mesh position={[0, 6, 0]} visible={cord}>
         <cylinderGeometry args={[0.04, 0.04, 9, 6]} />
         <meshStandardMaterial color="#1a1714" />
       </mesh>

@@ -24,7 +24,7 @@ function track(name: string, start: () => Promise<unknown>) {
 /** Start loading everything; safe to call more than once */
 export function preload3d(): Promise<void> {
   track('table', () => import('./Table3D'));
-  track('room', () => import('./rooms/Bar'));
+  track('rooms', () => Promise.all([import('./rooms/Bar'), import('./rooms/Space')]));
   track('fonts', () => import('./textures').then((m) => m.loadCardFonts()));
   track('characters', () => import('./characters').then((m) => m.preloadCharacters()));
   track('sounds', () => import('../../audio').then((m) => m.loadSamples()));

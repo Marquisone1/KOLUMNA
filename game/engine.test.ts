@@ -147,13 +147,15 @@ test('lobby settings: only the host changes them, only in the lobby; shuffled se
   const game = new Game('h');
   game.addPlayer('h', 'Host');
   for (const id of ['a', 'b', 'c', 'd']) game.addPlayer(id, id.toUpperCase(), true);
-  assert.deepEqual(game.s.settings, { view: 'both', shuffleSeats: false });
+  assert.deepEqual(game.s.settings, { view: 'both', shuffleSeats: false, room: 'bar' });
 
   assert.equal(game.apply('a', { a: 'settings', view: '2d' }).ok, false);
   assert.equal(game.apply('h', { a: 'settings', view: 'flat' as never }).ok, false);
   assert.equal(game.apply('h', { a: 'settings', view: '3d' }).ok, true);
   assert.equal(game.apply('h', { a: 'settings', shuffleSeats: true }).ok, true);
-  assert.deepEqual(game.s.settings, { view: '3d', shuffleSeats: true });
+  assert.equal(game.apply('h', { a: 'settings', room: 'moon' as never }).ok, false);
+  assert.equal(game.apply('h', { a: 'settings', room: 'space' }).ok, true);
+  assert.deepEqual(game.s.settings, { view: '3d', shuffleSeats: true, room: 'space' });
 
   // A game saved before settings existed still starts
   delete game.s.settings;

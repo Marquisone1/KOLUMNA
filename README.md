@@ -23,13 +23,17 @@ Add `?net=local` to the URL to play across tabs of one browser without any netwo
 The host sets these before the game starts; everyone else sees them:
 
 - **View for everyone**: *2D & 3D* (default, each player switches in the top bar), *3D only* or *2D only*. Devices without WebGL always get 2D.
+- **Room**: where the 3D table stands: *Bar* (default) or *Space*. `?world=space` shows a room locally without changing the setting.
 - **Shuffle the order every round**: seats are drawn again before every round, which changes who plays after whom. In 3D the players change chairs.
+
+The speaker button in the top bar opens a volume slider with a mute switch; level and mute are remembered per device.
 
 ## 3D table
 
 The game is played in first person at a round table by default (three.js through @react-three/fiber). You see the table from your chair: your own cards in front of you, the others sitting across and beside you, a lamp hanging over the table. With a mouse, move the pointer toward the screen edges to look around (the middle, where your cards are, stays still); on touch screens drag. The view turns back to the table on its own. While you are on the start screen or in the lobby, the 3D table, the room, the fonts and the characters already load in the background; a short loading screen covers the table until everything is in. The **2D / 3D** switch in the top bar changes the view at any time, also mid-game; the choice is remembered. Without WebGL, or if the 3D view fails to start, the 2D table is used. `?view=2d` forces 2D.
 
 - The game takes place in a **bar** around the table: counter with a bartender, two regulars at a high table, back bar with bottles, chalkboard, jukebox, dartboard, a rug under the table. The lamp over the card table is the main light; the rest of the room is lit indirectly. Rooms are separate modules in `components/three/rooms/`; more can be added there and picked by id.
+- Or in **space**: table, chairs and players ride on a round wooden deck that four small thrusters keep afloat, with red and green navigation lights on its rim. Around it a starfield with the Milky Way, the Earth with turning clouds behind the players, the Moon, a ringed planet, the ISS on a slow orbit, an asteroid belt, a few cards that got away, shooting stars now and then, and a cow in a space helmet drifting past. The stars wheel slowly and the sky rocks a little, so the table seems to drift. The sun lights everything from one side; the lamp over the table still lights the game. Planet textures are generated at load time from noise.
 - Hover over another player's cards (tap on touch screens) and a see-through copy of their grid appears beside yours, turned so you can read it.
 - Opponents' cards and the piles are drawn a little larger than yours so they read across the table; they lie the way their owner sees them, as on a real table.
 - Deck and discard pile sit on a **turntable** in the middle of the table that turns to face whoever's turn it is.
@@ -70,7 +74,7 @@ components/       Card, PlayerBoard, Table, Scoreboard, Screens, Icon,
                   viewMode (2D/3D choice, WebGL check)
 components/three/ Table3D (canvas, room, lamp, camera at your eyes, name plates),
                   stage (card objects, flights, turntable, discard button), characters (people at the table),
-                  rooms/ (the world around the table: Bar, room registry),
+                  rooms/ (the world around the table: Bar, Space, room registry),
                   characterModels (your .glb files), layout (seats, eye position, camera fit),
                   textures (canvas-drawn cards), animator3d
 ```

@@ -3,11 +3,11 @@ import { I18n, initialLang, makeT, type Lang } from './i18n';
 import { ClientSession, HostSession, rememberedId, savedHost, type Session } from './net/session';
 import { normalizeCode } from './net/transport';
 import { useGame } from './useGame';
-import { setSound, soundOn } from './audio';
 import { Home, Lobby, LangSwitch, RulesDialog, Wordmark, copyText, inviteLink } from './components/Screens';
 import { Table } from './components/Table';
 import { Scoreboard } from './components/Scoreboard';
 import { Icon } from './components/Icon';
+import { VolumeControl } from './components/VolumeControl';
 import type { Action, PeerHover } from './game/types';
 import { domAnimator, type Animator } from './anim';
 import { ViewBoundary, hasWebGL, initialViewMode, saveViewMode, type ViewMode } from './components/viewMode';
@@ -38,7 +38,6 @@ export default function App() {
   const [pending, setPending] = useState<'create' | 'join' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rules, setRules] = useState(false);
-  const [sound, setSoundState] = useState(soundOn());
   const [copied, setCopied] = useState(false);
   const animator = useRef<Animator>(domAnimator);
   const { view, lastEv, hovers, status, busy } = useGame(session, animator);
@@ -129,7 +128,6 @@ export default function App() {
 
   const send = useCallback((a: Action) => session?.send(a), [session]);
   const sendHover = useCallback((h: PeerHover | null) => session?.sendHover(h), [session]);
-  const toggleSound = () => { setSound(!sound); setSoundState(!sound); };
   const copyInvite = async () => {
     if (session && (await copyText(inviteLink(session.code)))) {
       setCopied(true);
@@ -181,7 +179,7 @@ export default function App() {
               ))}
             </div>
           )}
-          <button type="button" className="icon-btn" onClick={toggleSound} aria-label={t('sound')} aria-pressed={sound} title={t('sound')}><Icon name={sound ? 'volume' : 'mute'} /></button>
+          <VolumeControl />
           <LangSwitch />
           <button type="button" className="icon-btn" onClick={leave} aria-label={t('leave')} title={t('leave')}><Icon name="leave" /></button>
         </header>
@@ -194,7 +192,7 @@ export default function App() {
             {shown === '3d' ? (
               <ViewBoundary key="3d" onError={on3dError} fallback={null}>
                 <Suspense fallback={<div className="table3d table3d-loading"><span className="spinner spinner-lg" /></div>}>
-                  <Table3D view={view} me={session.pid} isHost={session.isHost} busy={busy} lastEv={lastEv} hovers={hovers} send={send} onHover={sendHover} animator={animator} />
+                  <Table3D view={view} me={session.pid} isHost={session.isHost} busy={busy} lastEv={lastEv} hovers={hovers} send={send} onHover={sendHover} animator={animator} room={view.settings?.room} />
                 </Suspense>
               </ViewBoundary>
             ) : (

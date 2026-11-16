@@ -9,18 +9,35 @@ let enabled = (() => {
   try { return localStorage.getItem('kolumna:sound') !== 'off'; } catch { return true; }
 })();
 
+let volume = (() => {
+  try {
+    const v = parseFloat(localStorage.getItem('kolumna:volume') ?? '');
+    return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.8;
+  } catch { return 0.8; }
+})();
+
 export function soundOn() { return enabled; }
 export function setSound(on: boolean) {
   enabled = on;
   try { localStorage.setItem('kolumna:sound', on ? 'on' : 'off'); } catch { /* ignore */ }
 }
 
+/** Overall level, 0 … 1 (stored; muting is separate so the level survives a mute) */
+export function getVolume() { return volume; }
+export function setVolume(v: number) {
+  volume = Math.max(0, Math.min(1, v));
+  try { localStorage.setItem('kolumna:volume', String(volume)); } catch { /* ignore */ }
+  if (master && ctx) master.gain.setTargetAtTime(gainFor(volume), ctx.currentTime, 0.02);
+}
+/** Ears hear loudness roughly logarithmically; a squared curve makes the slider feel even */
+const gainFor = (v: number) => 1.1 * v * v;
+
 function context(): AudioContext | null {
   try {
     if (!ctx) {
       ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
       master = ctx.createGain();
-      master.gain.value = 0.9;
+      master.gain.value = gainFor(volume);
       master.connect(ctx.destination);
     }
     return ctx;
@@ -30,7 +47,7 @@ function context(): AudioContext | null {
 }
 
 function ac(): AudioContext | null {
-  if (!enabled) return null;
+  if (!enabled || volume <= 0) return null;
   const a = context();
   if (a && a.state === 'suspended') a.resume().catch(() => {});
   return a;

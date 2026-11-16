@@ -48,13 +48,19 @@ export interface RoundResult {
 /** Which table views the players may use: both (each picks), or only one for everybody */
 export type ViewPolicy = 'both' | '2d' | '3d';
 
+/** The rooms the 3D table can stand in */
+export const ROOM_IDS = ['bar', 'space'] as const;
+export type RoomId = (typeof ROOM_IDS)[number];
+
 export interface Settings {
   view: ViewPolicy;
   /** Draw new seats before every round, which changes who plays after whom */
   shuffleSeats: boolean;
+  /** where the 3D table stands */
+  room: RoomId;
 }
 
-export const DEFAULT_SETTINGS: Settings = { view: 'both', shuffleSeats: false };
+export const DEFAULT_SETTINGS: Settings = { view: 'both', shuffleSeats: false, room: 'bar' };
 
 export interface GameState {
   phase: Phase;
@@ -116,7 +122,7 @@ export type Action =
   | { a: 'remove'; id: string }
   | { a: 'botTakeover'; id: string }
   | { a: 'target'; value: number }
-  | { a: 'settings'; view?: ViewPolicy; shuffleSeats?: boolean };
+  | { a: 'settings'; view?: ViewPolicy; shuffleSeats?: boolean; room?: RoomId };
 
 export interface PeerHover {
   card: number | null;
