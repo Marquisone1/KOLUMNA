@@ -5,7 +5,7 @@ Online card game for 2 to 6 players, German and English. Rules: twelve face-down
 ## Use in Google AI Studio
 
 1. AI Studio → **Build** → start a new app, open the code editor.
-2. Recreate the file tree below (or upload the zip if your AI Studio version offers import). The `index.html` already contains the import map AI Studio needs (React, PeerJS from esm.sh).
+2. Recreate the file tree below (or upload the zip if your AI Studio version offers import). The `index.html` already contains the import map AI Studio needs (React, PeerJS, three.js and @react-three/fiber from esm.sh; fiber is loaded with `?external=react,react-dom,three` so React and three exist only once).
 3. No API key is needed. The app does not call Gemini.
 4. Open the preview, create a room, share the 5-letter code. For friends on other devices, deploy/share the app (AI Studio "Deploy" or "Share") so everybody opens the same URL.
 
@@ -17,6 +17,14 @@ npm run dev        # http://localhost:3000
 ```
 
 Add `?net=local` to the URL to play across tabs of one browser without any network (useful for testing).
+
+## 3D table
+
+The game is played at a 3D table by default (three.js through @react-three/fiber). The **2D / 3D** switch in the top bar changes the view at any time, also mid-game; the choice is remembered. Without WebGL, or if the 3D view fails to start, the 2D table is used. `?view=2d` forces 2D.
+
+- Card faces, backs, felt and wood are drawn on canvases at runtime; there are no image files.
+- Every step from the engine is played as animate → commit → wait for the cards to land, for both views (`Animator` in `anim.ts`).
+- Phones: the pixel ratio is capped at 1.5, there is one shadow-casting lamp with a 1024 px shadow map, and frames are only rendered while something moves.
 
 ## How online play works
 
@@ -31,14 +39,18 @@ Add `?net=local` to the URL to play across tabs of one browser without any netwo
 index.html  index.tsx  index.css  App.tsx  metadata.json
 i18n.ts           German and English strings
 audio.ts          synthesized card sounds (Web Audio)
-anim.ts           card flights, flips, layout shifts
+anim.ts           Animator interface; 2D card flights, flips, layout shifts
 useGame.ts        plays incoming steps: animate, then commit
 game/types.ts     data model
 game/engine.ts    rules
 game/bot.ts       bot player (sees only public information)
 net/transport.ts  PeerJS + BroadcastChannel transports
 net/session.ts    host / guest sessions, reconnect
-components/       Card, PlayerBoard, Table, Scoreboard, Screens, Icon
+components/       Card, PlayerBoard, Table, Scoreboard, Screens, Icon,
+                  useTableModel (what can be clicked, status line; shared by 2D and 3D),
+                  viewMode (2D/3D choice, WebGL check)
+components/three/ Table3D (canvas, lamp, table, name plates), stage (card objects, flights),
+                  layout (seats, camera fit), textures (canvas-drawn cards), animator3d
 ```
 
 Icons from lucide (ISC). Design pass guided by unslop by Damir Sokolovsky (@heydamir), CC BY 4.0.
