@@ -1,16 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
-import { flushSync } from 'react-dom';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { GameEvent, GameState, PeerHover, Step } from './game/types';
 import type { Session } from './net/session';
-import { afterDelay, animateBefore, commitSound, measureCards, playLayoutShift, restoreHidden } from './anim';
-
-const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+import { domAnimator, type Animator } from './anim';
 
 /**
- * Plays incoming steps one after another: flight animation on the old state,
- * then commit the new state, then a short pause for CSS transitions.
+ * Plays incoming steps one after another: animation on the old state,
+ * then commit the new state, then wait for what the commit set in motion.
+ * The animator decides how a step looks (2D DOM flights or the 3D table).
  */
-export function useGame(session: Session | null) {
+export function useGame(session: Session | null, animator?: RefObject<Animator>) {
   const [view, setView] = useState<GameState | null>(null);
   const [lastEv, setLastEv] = useState<GameEvent | null>(null);
   const [hovers, setHovers] = useState<Record<string, PeerHover>>({});
@@ -37,28 +35,21 @@ export function useGame(session: Session | null) {
       await Promise.resolve();
       while (queue.current.length && alive.current) {
         const step = queue.current.shift()!;
+        const anim = animator?.current ?? domAnimator;
         // Catch up without animation when far behind or when the tab is in the background
         const skip = document.hidden || queue.current.length > 10 || step.ev.k === 'sync';
         try {
-          if (!skip) await animateBefore(step.ev, session!.pid);
+          if (!skip) await anim.before(step.ev, step.state, session!.pid);
         } catch { /* an animation must never block the game */ }
         if (!alive.current) break;
-        const before = skip ? null : measureCards();
-        if (skip) {
+        anim.commit(step.ev, step.state, () => {
           setView(step.state);
           setLastEv(step.ev);
-        } else {
-          flushSync(() => {
-            setView(step.state);
-            setLastEv(step.ev);
-          });
-        }
-        restoreHidden();
+        }, skip);
         if (!skip) {
-          if (before && step.ev.k !== 'deal') playLayoutShift(before);
-          commitSound(step.ev);
-          const d = afterDelay(step.ev, step.state);
-          if (d > 0) await wait(d);
+          try {
+            await anim.after(step.ev, step.state);
+          } catch { /* see above */ }
         }
       }
       running.current = false;
@@ -70,7 +61,7 @@ export function useGame(session: Session | null) {
       offHovers();
       offSteps();
     };
-  }, [session]);
+  }, [session]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { view, lastEv, hovers, status, busy };
 }

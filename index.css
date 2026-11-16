@@ -479,6 +479,58 @@ button.card { display: inline-block; }
 
 .connecting { min-height: 100dvh; display: grid; place-content: center; justify-items: center; gap: 16px; }
 
+/* ---------- 3D table ---------- */
+
+.table3d { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #141210; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.table3d > div:first-child { position: absolute !important; inset: 0; }
+.table3d canvas { display: block; outline: none; }
+.table3d-loading { display: grid; place-items: center; color: var(--text-2); }
+
+.hud3d {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 5;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  width: min(560px, calc(100% - 24px)); text-align: center; pointer-events: none;
+}
+.hud3d .status-main { font-size: 15px; text-wrap: balance; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
+.hud3d .status-final { font-size: 13px; color: var(--accent); }
+.hud3d .btn { pointer-events: auto; }
+.toast3d {
+  padding: 8px 12px; border-radius: 10px; font-size: 13px; white-space: nowrap;
+  background: var(--raised); border: 1px solid var(--hair-strong); color: var(--text);
+  animation: rise 260ms var(--ease) both;
+}
+
+.plate3d {
+  position: absolute; z-index: 4; transform: translate(-50%, -100%);
+  display: inline-flex; align-items: center; gap: 6px; max-width: 46vw;
+  height: 26px; padding: 0 8px; border-radius: 8px;
+  background: rgba(22, 21, 19, 0.94); border: 1px solid var(--hair-strong);
+  font-size: 12px; color: var(--text-2); white-space: nowrap;
+  transition: border-color 200ms var(--ease), color 200ms var(--ease);
+  pointer-events: none;
+}
+.plate3d .btn { pointer-events: auto; }
+.plate3d .board-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; color: var(--text); }
+.plate3d.is-turn { border-color: var(--seat); }
+.plate3d.is-turn .board-name { font-weight: 600; }
+.plate3d.is-offline { opacity: 0.7; }
+.plate3d.is-me { transform: translate(-50%, 0); font-size: 13px; }
+.plate-score { color: var(--text); font-weight: 600; }
+.plate-total { color: var(--text-2); }
+.pile-tag3d {
+  position: absolute; z-index: 3; transform: translate(-50%, 2px);
+  font-size: 11px; color: var(--text-2); pointer-events: none; white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+
+@media (max-width: 720px) {
+  .plate3d { height: 22px; padding: 0 6px; gap: 4px; font-size: 11px; }
+  .plate3d .board-name { max-width: 64px; }
+  .plate3d:not(.is-me) .plate-total, .plate3d:not(.is-me) .tag { display: none; }
+  .hud3d { top: 8px; }
+  .hud3d .status-main { font-size: 14px; }
+}
+
 /* ---------- small screens ---------- */
 
 @media (max-width: 900px) {

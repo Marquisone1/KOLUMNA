@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { I18n, initialLang, makeT, type Lang } from './i18n';
 import { ClientSession, HostSession, rememberedId, savedHost, type Session } from './net/session';
 import { normalizeCode } from './net/transport';
@@ -9,6 +9,11 @@ import { Table } from './components/Table';
 import { Scoreboard } from './components/Scoreboard';
 import { Icon } from './components/Icon';
 import type { Action, PeerHover } from './game/types';
+import { domAnimator, type Animator } from './anim';
+import { ViewBoundary, hasWebGL, initialViewMode, saveViewMode, type ViewMode } from './components/viewMode';
+
+// three.js only loads when the 3D table is shown
+const Table3D = lazy(() => import('./components/three/Table3D'));
 
 const read = (k: string) => { try { return localStorage.getItem(k) ?? ''; } catch { return ''; } };
 const write = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } };
@@ -35,7 +40,17 @@ export default function App() {
   const [rules, setRules] = useState(false);
   const [sound, setSoundState] = useState(soundOn());
   const [copied, setCopied] = useState(false);
-  const { view, lastEv, hovers, status, busy } = useGame(session);
+  const animator = useRef<Animator>(domAnimator);
+  const { view, lastEv, hovers, status, busy } = useGame(session, animator);
+  const webgl = useMemo(() => hasWebGL(), []);
+  const [mode, setModeState] = useState<ViewMode>(initialViewMode);
+  const [notice, setNotice] = useState<string | null>(null);
+  const setMode = useCallback((m: ViewMode) => { setModeState(m); saveViewMode(m); }, []);
+  const on3dError = useCallback(() => {
+    setModeState('2d');
+    setNotice(t('view3dFailed'));
+    setTimeout(() => setNotice(null), 4000);
+  }, [t]);
   const hadView = useRef(false);
   if (view) hadView.current = true;
 
@@ -136,7 +151,7 @@ export default function App() {
     );
   } else {
     body = (
-      <div className="game">
+      <div className={'game' + (mode === '3d' && webgl && view.phase !== 'lobby' ? ' is-3d' : '')}>
         <header className="topbar topbar-game">
           <Wordmark />
           <button type="button" className="code-chip" onClick={copyInvite} title={t('copyLink')}>
@@ -146,16 +161,34 @@ export default function App() {
           {view.phase !== 'lobby' && <span className="muted round-label">{t('roundN', { n: view.round })}</span>}
           <span className="spacer" />
           <button type="button" className="icon-btn" onClick={() => setRules(true)} aria-label={t('rules')} title={t('rules')}><Icon name="book" /></button>
+          {webgl && (
+            <div className="seg" role="group" aria-label={t('view')}>
+              {(['2d', '3d'] as ViewMode[]).map((m) => (
+                <button key={m} type="button" className={mode === m ? 'is-on' : ''} aria-pressed={mode === m} onClick={() => setMode(m)}>
+                  {m.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          )}
           <button type="button" className="icon-btn" onClick={toggleSound} aria-label={t('sound')} aria-pressed={sound} title={t('sound')}><Icon name={sound ? 'volume' : 'mute'} /></button>
           <LangSwitch />
           <button type="button" className="icon-btn" onClick={leave} aria-label={t('leave')} title={t('leave')}><Icon name="leave" /></button>
         </header>
         {status === 'lost' && <div className="banner" role="status"><span className="spinner" />{t('reconnecting')}</div>}
+        {notice && <div className="banner" role="status">{notice}</div>}
         {view.phase === 'lobby' ? (
           <Lobby view={view} code={session.code} me={session.pid} isHost={session.isHost} send={send} />
         ) : (
           <>
-            <Table view={view} me={session.pid} isHost={session.isHost} busy={busy} lastEv={lastEv} hovers={hovers} send={send} onHover={sendHover} />
+            {mode === '3d' && webgl ? (
+              <ViewBoundary key="3d" onError={on3dError} fallback={null}>
+                <Suspense fallback={<div className="table3d table3d-loading"><span className="spinner spinner-lg" /></div>}>
+                  <Table3D view={view} me={session.pid} isHost={session.isHost} busy={busy} lastEv={lastEv} hovers={hovers} send={send} onHover={sendHover} animator={animator} />
+                </Suspense>
+              </ViewBoundary>
+            ) : (
+              <Table view={view} me={session.pid} isHost={session.isHost} busy={busy} lastEv={lastEv} hovers={hovers} send={send} onHover={sendHover} />
+            )}
             {(view.phase === 'roundEnd' || view.phase === 'gameOver') && !busy && (
               <Scoreboard key={view.round} view={view} me={session.pid} isHost={session.isHost} send={send} onLeave={leave} />
             )}

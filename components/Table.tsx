@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import type { CSSProperties } from 'react';
 import type { Action, GameEvent, GameState, PeerHover } from '../game/types';
 import { useI18n } from '../i18n';
 import { Card, EmptySlot } from './Card';
 import { PlayerBoard } from './PlayerBoard';
 import { useViewport } from './useViewport';
+import { useTableModel } from './useTableModel';
 
 interface Props {
   view: GameState;
@@ -19,18 +20,8 @@ interface Props {
 export function Table({ view, me, isHost, busy, lastEv, hovers, send, onHover }: Props) {
   const { t } = useI18n();
   const { w: vw, h: vh } = useViewport();
-  const meIdx = view.players.findIndex((p) => p.id === me);
-  const mine = view.players[meIdx];
-  const current = view.players[view.turn];
-  const myTurn = view.phase === 'play' && current?.id === me;
-
-  // Opponents in seating order, starting with the player after me
-  const opponents = useMemo(() => {
-    const n = view.players.length;
-    const out = [];
-    for (let i = 1; i < n; i++) out.push(view.players[(Math.max(0, meIdx) + i) % n]);
-    return meIdx < 0 ? view.players : out;
-  }, [view.players, meIdx]);
+  const m = useTableModel(view, me, busy, lastEv, send);
+  const { mine, myTurn, stage, canAct, opponents, selectable, onMyCard, deckActive, discardActive, onDiscard, status, tone, finalNote, toast, holder } = m;
 
   // Card sizes follow the viewport. Wide screens put the piles beside your board, narrow ones stack.
   const side = vw >= 960;
@@ -53,80 +44,8 @@ export function Table({ view, me, isHost, busy, lastEv, hovers, send, onHover }:
   myW = Math.max(44, Math.round(myW));
   pileW = Math.max(44, Math.round(pileW));
 
-  const stage = view.stage;
-  const canAct = !busy;
-  const [pendingSetup, setPendingSetup] = useState<number[]>([]);
-  useEffect(() => {
-    if (view.phase !== 'setup') setPendingSetup([]);
-  }, [view.phase, view.round]);
-
-  const selectable = (cardId: number, up: boolean) => {
-    if (!mine) return false;
-    if (view.phase === 'setup') {
-      if (up || pendingSetup.includes(cardId)) return false;
-      const flippedIds = new Set(mine.grid.flat().filter((s) => s.up).map((s) => s.card.id));
-      const inFlight = pendingSetup.filter((id) => !flippedIds.has(id)).length;
-      return mine.setupFlips + inFlight < 2;
-    }
-    if (!canAct || !myTurn) return false;
-    if (stage === 'deckDrawn' || stage === 'discardTaken') return true;
-    if (stage === 'mustFlip') return !up;
-    return false;
-  };
-  const onMyCard = (cardId: number) => {
-    if (view.phase === 'setup') {
-      setPendingSetup((prev) => (prev.includes(cardId) ? prev : [...prev, cardId]));
-      return send({ a: 'flip', card: cardId });
-    }
-    if (stage === 'mustFlip') return send({ a: 'flip', card: cardId });
-    send({ a: 'swap', card: cardId });
-  };
-
-  const deckActive = canAct && myTurn && stage === 'choose';
-  const discardActive = canAct && myTurn && (stage === 'choose' || stage === 'deckDrawn');
-  const onDiscard = () => {
-    if (stage === 'choose') send({ a: 'takeDiscard' });
-    else if (stage === 'deckDrawn') send({ a: 'toss' });
-  };
-
   const top = view.discard[view.discard.length - 1];
   const under = view.discard[view.discard.length - 2];
-
-  // Status line
-  let status = '';
-  let tone: 'mine' | 'wait' = 'wait';
-  if (view.phase === 'setup') {
-    const left = mine ? 2 - mine.setupFlips : 0;
-    status = left === 2 ? t('setupMine') : left === 1 ? t('setupOne') : t('setupWait');
-    tone = left > 0 ? 'mine' : 'wait';
-  } else if (view.phase === 'play' && current) {
-    if (myTurn) {
-      tone = 'mine';
-      status = { choose: t('chooseMine'), deckDrawn: t('deckDrawnMine'), discardTaken: t('discardTakenMine'), mustFlip: t('mustFlipMine') }[stage];
-    } else {
-      status = t('turnOf', { name: current.name });
-    }
-  }
-  const finisher = view.finisher ? view.players.find((p) => p.id === view.finisher) : null;
-  const finalNote = finisher && view.phase === 'play'
-    ? (myTurn && view.lastTurns.includes(me) ? t('yourLastTurn') : t('finalTurns', { name: finisher.name }))
-    : null;
-
-  // Short note when a column is cleared
-  const [toast, setToast] = useState<string | null>(null);
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => {
-    if (lastEv?.k === 'clear' && view.phase === 'play') {
-      const p = view.players.find((x) => x.id === lastEv.p);
-      if (p) {
-        setToast(t('clears', { name: p.id === me ? t('you') : p.name }));
-        clearTimeout(toastTimer.current);
-        toastTimer.current = setTimeout(() => setToast(null), 2200);
-      }
-    }
-  }, [lastEv]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const holder = view.drawn ? current : null;
 
   return (
     <div className={'table ' + (side ? 'is-side' : 'is-stack')}>

@@ -1,6 +1,17 @@
+import { flushSync } from 'react-dom';
 import { cardElement } from './components/Card';
 import { sfx } from './audio';
 import type { GameEvent, GameState } from './game/types';
+
+/**
+ * Plays one step: `before` animates on the old state, `commit` applies the new state,
+ * `after` waits for whatever the commit set in motion. The 2D table and the 3D table each have one.
+ */
+export interface Animator {
+  before(ev: GameEvent, state: GameState, myId: string): Promise<void>;
+  commit(ev: GameEvent, state: GameState, apply: () => void, skip: boolean): void;
+  after(ev: GameEvent, state: GameState): Promise<void>;
+}
 
 // Card flights: a temporary card travels from one place on the table to another
 // while the real state is still the old one. The state commits when it lands.
@@ -190,3 +201,21 @@ export function playLayoutShift(before: Map<string, DOMRect>) {
     el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 360, easing: EASE });
   });
 }
+
+/** The 2D table: DOM card flights before the commit, FLIP layout shifts after it */
+export const domAnimator: Animator = {
+  before: (ev, _state, myId) => animateBefore(ev, myId),
+  commit(ev, _state, apply, skip) {
+    const before = skip ? null : measureCards();
+    if (skip) apply();
+    else flushSync(apply);
+    restoreHidden();
+    if (skip) return;
+    if (before && ev.k !== 'deal') playLayoutShift(before);
+    commitSound(ev);
+  },
+  async after(ev, state) {
+    const d = afterDelay(ev, state);
+    if (d > 0) await wait(d);
+  },
+};
