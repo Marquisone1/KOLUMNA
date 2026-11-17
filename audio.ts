@@ -205,10 +205,10 @@ export const sfx = {
   /** the deck riffled */
   shuffle: () => { if (!sample('shuffle', { gain: 0.8 })) for (let i = 0; i < 6; i++) snap(2000 + i * 120, 0.05, 0.12, i * 0.045); },
   /** dealing: cards slide out one after another, panned toward where they land */
-  deal: (count: number, pans: number[] = []) => {
+  deal: (count: number, pans: number[] = [], gap = 0.09) => {
     const n = Math.min(count, 14);
     for (let i = 0; i < n; i++) {
-      if (!sample('slide', { gain: 0.45, rate: 1.15, when: i * 0.09, pan: pans[i % Math.max(1, pans.length)] })) snap(2400, 0.08, 0.1, i * 0.09);
+      if (!sample('slide', { gain: 0.45, rate: 1.15, when: i * gap, pan: pans[i % Math.max(1, pans.length)] })) snap(2400, 0.08, 0.1, i * gap);
     }
   },
   /** the discard button pressed */

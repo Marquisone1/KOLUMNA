@@ -20,7 +20,6 @@ export default defineConfig({
       'three/examples/jsm/postprocessing/EffectComposer.js',
       'three/examples/jsm/postprocessing/RenderPass.js',
       'three/examples/jsm/postprocessing/GTAOPass.js',
-      'three/examples/jsm/postprocessing/SMAAPass.js',
       'three/examples/jsm/postprocessing/OutputPass.js',
     ],
   },

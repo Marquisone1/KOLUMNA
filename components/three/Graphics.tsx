@@ -4,7 +4,6 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
-import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 
 // Lighting beyond what the lights alone give: ambient occlusion, a bounce from the felt,
@@ -29,13 +28,16 @@ export function initialQuality(width: number): Quality {
 
 /**
  * Renders through a composer: the scene, ground-truth ambient occlusion (contact shadows in
- * corners, under cards and furniture, where figures meet the table), SMAA, then tone mapping.
+ * corners, under cards and furniture, where figures meet the table), then tone mapping; drawn multisampled.
  * Taking over the render loop is what a useFrame with priority 1 does in react-three-fiber.
  */
 export function PostEffects() {
   const { gl, scene, camera, size } = useThree();
   const composer = useMemo(() => {
-    const c = new EffectComposer(gl);
+    // the scene is drawn into a 4× multisampled buffer: real geometric antialiasing for the thin card
+    // edges, sharper than a post-process filter (the size is set below)
+    const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
+    const c = new EffectComposer(gl, target);
     c.addPass(new RenderPass(scene, camera));
     const ao = new GTAOPass(scene, camera, size.width, size.height);
     ao.output = GTAOPass.OUTPUT.Default;
@@ -43,7 +45,6 @@ export function PostEffects() {
     ao.updateGtaoMaterial({ radius: 0.9, distanceExponent: 1.6, thickness: 1.2, scale: 1.0, samples: 12 });
     ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
     c.addPass(ao);
-    c.addPass(new SMAAPass());
     c.addPass(new OutputPass());
     return c;
   }, [gl, scene, camera]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -308,7 +308,7 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
       {size.w > 0 && (
         <Canvas
           shadows="percentage"
-          dpr={[1, Math.min(typeof devicePixelRatio === 'number' ? devicePixelRatio : 1, size.w < 700 ? 1.5 : 1.75)]}
+          dpr={[1, Math.min(typeof devicePixelRatio === 'number' ? devicePixelRatio : 1, 2)]}
           frameloop="demand"
           gl={{ antialias: quality !== 'high', powerPreference: 'high-performance', alpha: false }}
           camera={{ fov: layout.camera.fov, near: 0.2, far: 420, position: layout.camera.pos.toArray() as [number, number, number] }}

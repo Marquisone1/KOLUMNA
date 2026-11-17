@@ -15,6 +15,8 @@ import { CARD_T, GRID_D, GRID_W, PILE_SCALE, PITCH_X, PITCH_Z, opponentHandPose,
 const ACCENT = new THREE.Color('#e3a34a');
 const WHITE = new THREE.Color('#efe9de');
 const DISCARD_SHOWN = 6;
+/** Time factor for every card movement on the 3D table (1 = the original, calmer pace) */
+export const TEMPO = 0.62;
 /** Height of the turntable's top above the felt */
 export const TT_H = 0.17;
 const TT_R = 1.95;
@@ -529,7 +531,7 @@ export class TableStage {
       this.ttGoal = next;
       this.ttFrom = this.ttAngle;
       this.ttT0 = performance.now();
-      this.ttDur = this.reduced ? 0 : 420 + Math.abs(next - this.ttAngle) * 220;
+      this.ttDur = this.reduced ? 0 : (420 + Math.abs(next - this.ttAngle) * 220) * Math.max(TEMPO, 0.75);
     }
     this.invalidate();
   }
@@ -682,7 +684,7 @@ export class TableStage {
     let arc = Math.min(1.1, dist * 0.16);
     if (flips) arc = Math.max(arc, CARD_W * 0.55 * Math.max(from.s, to.s));
     if (arcOverride !== undefined) arc = arcOverride;
-    const dur = (Math.min(820, 360 + dist * 70) + (flips ? 80 : 0)) * pace;
+    const dur = (Math.min(820, 360 + dist * 70) + (flips ? 80 : 0)) * pace * TEMPO;
     obj.tween?.resolve?.();
     obj.tween = { from, to: { ...to }, t0, dur, arc };
   }
@@ -708,17 +710,17 @@ export class TableStage {
   gather() {
     const ids = [...this.cards.keys()];
     const top = this.deckTop();
-    return Promise.all(ids.map((id, i) => this.flyTo(id, { ...top, y: top.y + 0.002 * (i % 10) }, { delay: (i % 24) * 18, pace: 0.85 })));
+    return Promise.all(ids.map((id, i) => this.flyTo(id, { ...top, y: top.y + 0.002 * (i % 10) }, { delay: (i % 24) * 18 * TEMPO, pace: 0.85 })));
   }
 
   /** The discard pile apart from its new top goes back to the deck, then the deck gives a short riffle */
   async reshuffle(keepTop: number | null) {
     const under = this.discardIds.filter((id) => id !== keepTop && this.cards.has(id));
     const deck = this.deckTop();
-    await Promise.all(under.map((id, i) => this.flyTo(id, { ...deck, y: deck.y + i * CARD_T }, { delay: i * 70, pace: 0.9 })));
+    await Promise.all(under.map((id, i) => this.flyTo(id, { ...deck, y: deck.y + i * CARD_T }, { delay: i * 70 * TEMPO, pace: 0.9 })));
     this.shuffleT = performance.now();
     this.invalidate();
-    await new Promise((r) => setTimeout(r, this.reduced ? 0 : 520));
+    await new Promise((r) => setTimeout(r, this.reduced ? 0 : 520 * TEMPO));
   }
 
   /** Lift cards off the table, e.g. a column about to be cleared */
