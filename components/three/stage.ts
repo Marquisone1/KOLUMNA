@@ -516,7 +516,7 @@ export class TableStage {
     // halfway between the turntable and your cards, low enough to stay under your line of sight to the piles
     const mine = layout.seats.find((st) => st && st.angle === 0) ?? layout.seats[0];
     const near = mine.z - GRID_D / 2;
-    this.pileHolo.position.set(0, 0.55, near - (near - 1.95) * 0.45);
+    this.pileHolo.position.set(0, 0.43, near - (near - 1.95) * 0.3);
     const toEye = layout.eye.clone().sub(this.pileHolo.position);
     this.pileHolo.rotation.set(Math.atan2(toEye.z, toEye.y) * 0.85, 0, 0);
     this.pileHolo.scale.setScalar(layout.portrait ? 1.05 : 1.2);
