@@ -128,6 +128,9 @@ export interface PeerHover {
   card: number | null;
   x: number;
   y: number;
+  /** where the player is looking in 3D: [yaw, pitch] in radians relative to facing the table centre
+   *  (yaw > 0 to their left, pitch > 0 down); absent in 2D */
+  look?: [number, number];
 }
 
 export const MAX_PLAYERS = 6;

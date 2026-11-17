@@ -17,7 +17,7 @@ import { DEFAULT_ROOM, ROOMS, type RoomId } from './rooms';
 import { threeAnimator } from './animator3d';
 import { preload3d, preloadProgress } from './preload';
 import { sfx } from '../../audio';
-import { FeltBounce, LampHaze, PostEffects, QualityWatch, initialQuality, qualityForced, type Quality } from './Graphics';
+import { AdaptiveResolution, FeltBounce, LampHaze, PostEffects, QualityWatch, initialQuality, qualityForced, type Quality } from './Graphics';
 
 interface Props {
   view: GameState;
@@ -46,7 +46,7 @@ interface Overlay {
 }
 
 /** Looking around: drag offsets for the head, eased back once you let go */
-interface Look { yaw: number; pitch: number; dragging: boolean; follow: boolean }
+interface Look { yaw: number; pitch: number; dragging: boolean; follow: boolean; locked: boolean }
 
 export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, onHover, animator, room = DEFAULT_ROOM }: Props) {
   const { t } = useI18n();
@@ -68,7 +68,7 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
     send({ a: 'toss' });
   };
   const overlay = useRef<Overlay>({ plates: new Map(), deck: null });
-  const look = useRef<Look>({ yaw: 0, pitch: 0, dragging: false, follow: false });
+  const look = useRef<Look>({ yaw: 0, pitch: 0, dragging: false, follow: false, locked: false });
   const invalidateRef = useRef<() => void>(() => {});
   // a loading screen covers the table until every asset is in and the first frames are drawn
   const [loaded, setLoaded] = useState(false);
@@ -147,6 +147,11 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
 
   useEffect(() => { stage.setTossLabel(t('discardIt')); }, [stage, t]);
 
+  // the others' heads follow where their players look
+  useEffect(() => {
+    view.players.forEach((p) => { if (p.id !== me) chars.setGaze(p.id, hovers?.[p.id]?.look ?? null); });
+  }, [hovers, view.players, me, chars]);
+
   // Which cards and piles take a click right now
   const mine = m.mine;
   useLayoutEffect(() => {
@@ -167,6 +172,41 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
     stage.refreshInteractive();
   });
 
+  // First person with a mouse: a click on the table catches the pointer (pointer lock); then moving the
+  // mouse turns your head and a crosshair in the middle picks what you click. Esc lets go again.
+  const [locked, setLocked] = useState(false);
+  const maxDpr = useMemo(() => Math.min(typeof devicePixelRatio === 'number' ? devicePixelRatio : 1, 2), []);
+  const [dpr, setDpr] = useState(maxDpr);
+  // ?lock=0 keeps the pointer free (the older look-at-the-edges mode)
+  const finePointer = useMemo(() => typeof matchMedia !== 'undefined' && matchMedia('(pointer: fine)').matches
+    && new URLSearchParams(location.search).get('lock') !== '0', []);
+  // when the click that caught the pointer happened: that click itself does not play a card
+  const lockClickAt = useRef(-1e9);
+  const canvasEl = () => wrap.current?.querySelector('canvas') ?? null;
+  useEffect(() => {
+    const change = () => {
+      const on = !!document.pointerLockElement && document.pointerLockElement === canvasEl();
+      look.current.locked = on;
+      look.current.follow = on;
+      setLocked(on);
+      if (!on) { clearHoverRef.current(); }
+      invalidateRef.current();
+    };
+    document.addEventListener('pointerlockchange', change);
+    return () => {
+      document.removeEventListener('pointerlockchange', change);
+      if (document.pointerLockElement && document.pointerLockElement === canvasEl()) document.exitPointerLock();
+    };
+  }, []);
+  // the score sheet between rounds needs a free pointer
+  useEffect(() => {
+    if (view.phase !== 'play' && view.phase !== 'setup' && document.pointerLockElement) document.exitPointerLock();
+  }, [view.phase]);
+  const clearHoverRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) Object.assign(window as object, { __look: look.current });
+  }, []);
+
   // Looking around. With a mouse the view follows the pointer near the screen edges and stays still in the
   // middle, where the cards are, so nothing slides away under the pointer. It turns back when the pointer
   // leaves. On touch screens you drag instead; the view turns back when you let go.
@@ -176,6 +216,15 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
     const edge = (n: number) => Math.sign(n) * Math.max(0, Math.abs(n) - 0.55) / 0.45;
     let start: { x: number; y: number; yaw: number; pitch: number; id: number } | null = null;
     const move = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse' && look.current.locked) {
+        // browsers sometimes report one huge jump right after the pointer is caught; ignore it
+        if (Math.abs(e.movementX) > 250 || Math.abs(e.movementY) > 250) return;
+        const k = 0.0024;
+        look.current.yaw = Math.max(-2.7, Math.min(2.7, look.current.yaw + e.movementX * k));
+        look.current.pitch = Math.max(-0.75, Math.min(0.95, look.current.pitch - e.movementY * k));
+        invalidateRef.current();
+        return;
+      }
       if (e.pointerType === 'mouse') {
         const r = el.getBoundingClientRect();
         const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
@@ -198,7 +247,19 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
       invalidateRef.current();
     };
     const down = (e: PointerEvent) => {
-      if (e.pointerType === 'mouse' || (e.target as HTMLElement).closest('button')) return;
+      if (e.pointerType === 'mouse') {
+        const c = canvasEl();
+        if (finePointer && !look.current.locked && c && e.target === c && e.button === 0) {
+          // this click only catches the pointer; it does not play a card
+          lockClickAt.current = performance.now();
+          try {
+            const r = c.requestPointerLock() as unknown as Promise<void> | undefined;
+            r?.catch?.(() => { lockClickAt.current = -1e9; });
+          } catch { lockClickAt.current = -1e9; }
+        }
+        return;
+      }
+      if ((e.target as HTMLElement).closest('button')) return;
       start = { x: e.clientX, y: e.clientY, yaw: look.current.yaw, pitch: look.current.pitch, id: e.pointerId };
     };
     const up = (e: PointerEvent) => {
@@ -208,7 +269,7 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
       setTimeout(() => { look.current.dragging = false; invalidateRef.current(); }, 0);
     };
     const leave = (e: PointerEvent) => {
-      if (e.pointerType !== 'mouse') return;
+      if (e.pointerType !== 'mouse' || look.current.locked) return;
       look.current.follow = false;
       invalidateRef.current();
     };
@@ -249,20 +310,36 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
     }
     setCursor(false);
   };
+  // what the others see of you: the card under your pointer and where you look, in one message
+  const hoverNow = useRef<PeerHover | null>(null);
+  const gazeNow = useRef<[number, number] | null>(null);
+  const pushHover = () => {
+    if (!onHover) return;
+    const h = hoverNow.current;
+    const g = gazeNow.current;
+    if (!h && !g) onHover(null);
+    else onHover({ ...(h ?? { card: null, x: 0, y: 0 }), ...(g ? { look: g } : {}) });
+  };
   const reportHover = (cardId: number | null) => {
     if (!onHover) return;
     const now = performance.now();
     if (cardId === null) {
       lastHoverSent.current = 0;
-      onHover(null);
+      if (hoverNow.current) { hoverNow.current = null; pushHover(); }
       return;
     }
     if (now - lastHoverSent.current < 40) return;
     lastHoverSent.current = now;
     const slot = stage.slots.get(cardId);
     if (!slot) return;
-    onHover({ card: cardId, x: (slot.c + 0.5) / slot.cols, y: (slot.r + 0.5) / 3 });
+    hoverNow.current = { card: cardId, x: (slot.c + 0.5) / slot.cols, y: (slot.r + 0.5) / 3 };
+    pushHover();
   };
+  const reportGaze = (g: [number, number]) => {
+    gazeNow.current = g;
+    pushHover();
+  };
+  clearHoverRef.current = () => { clearHover(); reportHover(null); stage.setPreview(null); };
   const onMove = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
     if (e.pointerType === 'touch' || look.current.dragging) return;
@@ -288,7 +365,8 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
   };
   const onClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
-    if (look.current.dragging || e.delta > 8) return;
+    if (performance.now() - lockClickAt.current < 600) return;
+    if (look.current.dragging || (!look.current.locked && e.delta > 8)) return;
     const hit = pick(e);
     if (!hit) {
       // on touch screens there is no hover: a tap on someone else's grid shows or hides the copy
@@ -316,7 +394,7 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
       {size.w > 0 && (
         <Canvas
           shadows="percentage"
-          dpr={[1, Math.min(typeof devicePixelRatio === 'number' ? devicePixelRatio : 1, 2)]}
+          dpr={dpr}
           frameloop="demand"
           gl={{ antialias: quality !== 'high', powerPreference: 'high-performance', alpha: false }}
           camera={{ fov: layout.camera.fov, near: 0.2, far: 420, position: layout.camera.pos.toArray() as [number, number, number] }}
@@ -330,6 +408,9 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
           onPointerMissed={onOut}
         >
           <CameraRig layout={layout} look={look} invalidateRef={invalidateRef} />
+          <CenterPointer look={look} />
+          {!qualityForced() && <AdaptiveResolution max={maxDpr} setDpr={setDpr} />}
+          {onHover && m.meIdx >= 0 && <GazeSender seatYaw={layout.seats[m.meIdx]?.yaw ?? 0} onGaze={reportGaze} />}
           <Reflections />
           <TableAndLamp layout={layout} mobile={size.w < 700} cord={place !== 'space'} />
           <FeltBounce radius={layout.table.r} />
@@ -354,6 +435,10 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
         </div>
       </div>
 
+      {locked && <div className="crosshair3d" aria-hidden="true" />}
+      {finePointer && !locked && shown && (view.phase === 'play' || view.phase === 'setup') && (
+        <p className="lock-hint3d">{t('lockHint')}</p>
+      )}
       <div className="hud3d" aria-live="polite">
         {m.status && (
           <div className={'status-pill tone-' + m.tone}>
@@ -467,7 +552,7 @@ function CameraRig({ layout, look, invalidateRef }: { layout: Layout; look: RefO
     }
     const c = cur.current;
     // following the mouse is a slow, steady head turn; a drag follows the finger closely
-    const k2 = 1 - Math.exp(-dt * (L.follow ? 3.5 : 14));
+    const k2 = L.locked ? 1 - Math.exp(-dt * 45) : 1 - Math.exp(-dt * (L.follow ? 3.5 : 14));
     c.yaw += (L.yaw - c.yaw) * k2;
     c.pitch += (L.pitch - c.pitch) * k2;
     if (Math.abs(c.yaw - L.yaw) < 1e-4) c.yaw = L.yaw;
@@ -481,8 +566,55 @@ function CameraRig({ layout, look, invalidateRef }: { layout: Layout; look: RefO
   return null;
 }
 
+/** While the pointer is caught, every pointer event aims through the middle of the screen (the crosshair) */
+function CenterPointer({ look }: { look: RefObject<Look> }) {
+  const setEvents = useThree((st) => st.setEvents);
+  useEffect(() => {
+    setEvents({
+      compute: (event, state) => {
+        if (look.current.locked) state.pointer.set(0, 0);
+        else state.pointer.set((event.offsetX / state.size.width) * 2 - 1, -(event.offsetY / state.size.height) * 2 + 1);
+        state.raycaster.setFromCamera(state.pointer, state.camera);
+      },
+    });
+  }, [setEvents, look]);
+  // the view keeps turning for a moment after the mouse stops: aim again whenever it has moved
+  const events = useThree((st) => st.events);
+  const camera = useThree((st) => st.camera);
+  const last = useMemo(() => new THREE.Quaternion(), []);
+  useFrame(() => {
+    if (!look.current.locked || camera.quaternion.equals(last)) return;
+    last.copy(camera.quaternion);
+    (events.handlers as { onPointerMove?: (e: PointerEvent) => void } | undefined)?.onPointerMove?.(new PointerEvent('pointermove', { pointerType: 'mouse' }));
+  });
+  return null;
+}
+
+/** Tells the others where you look, relative to facing the table centre, a few times a second when it changes */
+function GazeSender({ seatYaw, onGaze }: { seatYaw: number; onGaze: (g: [number, number]) => void }) {
+  const { camera } = useThree();
+  const last = useRef({ t: 0, yaw: 99, pitch: 99 });
+  const d = useMemo(() => new THREE.Vector3(), []);
+  useFrame(() => {
+    const now = performance.now();
+    const l = last.current;
+    if (now - l.t < 150) return;
+    camera.getWorldDirection(d);
+    let yaw = Math.atan2(-d.x, -d.z) - seatYaw;
+    yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
+    const pitch = Math.atan2(-d.y, Math.hypot(d.x, d.z));
+    if (Math.abs(yaw - l.yaw) < 0.04 && Math.abs(pitch - l.pitch) < 0.04) return;
+    last.current = { t: now, yaw, pitch };
+    onGaze([Math.round(yaw * 100) / 100, Math.round(pitch * 100) / 100]);
+  });
+  return null;
+}
+
 function StageDriver({ stage, chars }: { stage: TableStage; chars: Characters }) {
-  const { invalidate, camera, gl } = useThree();
+  const { invalidate, camera, gl, get } = useThree();
+  useEffect(() => {
+    if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) Object.assign(window as object, { __r3f: get });
+  }, [get]);
   useEffect(() => {
     stage.camera = camera;
     stage.canvas = gl.domElement;
@@ -530,11 +662,32 @@ function OverlayDriver({ overlay, chars, layout, stage }: { overlay: RefObject<O
   };
   useFrame(() => {
     const o = overlay.current;
+    const shownPlates: HTMLElement[] = [];
     o.plates.forEach((el, id) => {
-      if (chars.headOf(id, v)) place(el, v, true);
+      if (chars.headOf(id, v)) { place(el, v, true); shownPlates.push(el); }
       else el.style.visibility = 'hidden';
     });
-    if (o.deck) { const w = stage.worldOnTurntable(layout.deck.x, layout.deck.z + 0.66); place(o.deck, v.set(w.x, TT_H, w.z), false); }
+    // plates pushed to the screen edge (players beside or behind you) must not cover each other:
+    // a plate that overlaps one placed before it moves down below it
+    const boxes: { x: number; y: number; w: number; h: number }[] = [];
+    shownPlates
+      .map((el) => ({ el, x: parseFloat(el.style.left), y: parseFloat(el.style.top), w: el.offsetWidth, h: el.offsetHeight }))
+      .sort((a, b) => a.y - b.y || a.x - b.x)
+      .forEach((b) => {
+        let y = b.y;
+        for (let moved = true, guard = 0; moved && guard < 8; guard++) {
+          moved = false;
+          for (const o2 of boxes) {
+            if (Math.abs(b.x - o2.x) < (b.w + o2.w) / 2 + 4 && Math.abs(y - o2.y) < (b.h + o2.h) / 2 + 4) {
+              y = o2.y + (b.h + o2.h) / 2 + 6;
+              moved = true;
+            }
+          }
+        }
+        if (y !== b.y) b.el.style.top = y + 'px';
+        boxes.push({ x: b.x, y, w: b.w, h: b.h });
+      });
+    if (o.deck) { const w = stage.worldOnTurntable(layout.deck.x, layout.deck.z + 0.95); place(o.deck, v.set(w.x, TT_H, w.z), false); }
   });
   return null;
 }

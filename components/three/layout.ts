@@ -101,19 +101,16 @@ export function sitterPoint(seat: Seat) {
   return new THREE.Vector3(p.x, 0, p.z);
 }
 
-function spread(m: number, portrait: boolean) {
-  if (m <= 0) return [];
-  if (m === 1) return [Math.PI];
-  // in first person the others mostly sit across from you, so you can see them
-  const range = portrait ? (m <= 2 ? 44 : 100) : (m <= 2 ? 110 : 160);
-  const step = Math.min(120, range / (m - 1));
-  return Array.from({ length: m }, (_, i) => ((180 + (i - (m - 1) / 2) * step) * Math.PI) / 180);
+/** Everyone sits evenly round the table, as at a real one: with n players, one every 360/n degrees */
+function spread(m: number) {
+  const n = m + 1;
+  return Array.from({ length: m }, (_, i) => ((i + 1) / n) * Math.PI * 2);
 }
 
 export function computeLayout(n: number, meIdx: number, aspect: number, hudTop: number, hudBottom: number): Layout {
   const portrait = aspect < 0.9;
   const m = Math.max(0, n - 1);
-  const angles = spread(m, portrait);
+  const angles = spread(m);
 
   // Grids sit on a circle. Grow it until neither grids nor the people behind them crowd each other.
   let R = m <= 1 ? 5.2 : 6.2;
@@ -161,7 +158,9 @@ export function computeLayout(n: number, meIdx: number, aspect: number, hudTop: 
     const hd = GRID_D / 2 + 0.05;
     for (const [lx, lz] of [[-hw, -hd], [hw, -hd], [-hw, hd], [hw, hd]]) {
       const p = seatPoint(seat, lx, lz);
-      (i === me ? must : grids).push(new THREE.Vector3(p.x, 0, p.z));
+      // grids beside and behind you are seen by turning your head, they do not widen the view
+      if (i === me) must.push(new THREE.Vector3(p.x, 0, p.z));
+      else if (Math.abs(Math.atan2(Math.sin(seat.angle), Math.cos(seat.angle))) > (portrait ? 2.2 : 1.9)) grids.push(new THREE.Vector3(p.x, 0, p.z));
     }
     // faces in front of you; those beside you are seen by turning your head (drag)
     if (i !== me) {

@@ -30,7 +30,7 @@ The speaker button in the top bar opens a volume slider with a mute switch; leve
 
 ## 3D table
 
-The game is played in first person at a round table by default (three.js through @react-three/fiber). You see the table from your chair: your own cards in front of you, the others sitting across and beside you, a lamp hanging over the table. With a mouse, move the pointer toward the screen edges to look around (the middle, where your cards are, stays still); on touch screens drag. The view turns back to the table on its own. While you are on the start screen or in the lobby, the 3D table, the room, the fonts and the characters already load in the background; a short loading screen covers the table until everything is in. The **2D / 3D** switch in the top bar changes the view at any time, also mid-game; the choice is remembered. Without WebGL, or if the 3D view fails to start, the 2D table is used. `?view=2d` forces 2D.
+The game is played in first person at a round table by default (three.js through @react-three/fiber). You see the table from your chair: your own cards in front of you, the others sitting across and beside you, a lamp hanging over the table. Everyone sits evenly round the table (with six players, one every 60°), and every player sees it from their own chair; neighbours beside you are seen by turning your head. With a mouse, click the table to catch the pointer: moving the mouse then turns your head, a small crosshair in the middle picks what you click, and Esc lets go (`?lock=0` keeps the older mode, where moving the pointer toward the screen edges looks around). The other players' figures turn their heads to where their players are actually looking. On touch screens drag; the view turns back to the table on its own. While you are on the start screen or in the lobby, the 3D table, the room, the fonts and the characters already load in the background; a short loading screen covers the table until everything is in. The **2D / 3D** switch in the top bar changes the view at any time, also mid-game; the choice is remembered. Without WebGL, or if the 3D view fails to start, the 2D table is used. `?view=2d` forces 2D.
 
 - The game takes place in a **bar** around the table: counter with a bartender, two regulars at a high table, back bar with bottles, chalkboard, jukebox, dartboard, a rug under the table. The lamp over the card table is the main light; the rest of the room is lit indirectly. Rooms are separate modules in `components/three/rooms/`; more can be added there and picked by id.
 - Or in **space**: table, chairs and players ride on a round wooden deck that four small thrusters keep afloat, with red and green navigation lights on its rim. Around it a starfield with the Milky Way, the Earth with turning clouds behind the players, the Moon, a ringed planet, the ISS on a slow orbit, an asteroid belt, a few cards that got away, shooting stars now and then, and a cow in a space helmet drifting past. The stars wheel slowly and the sky rocks a little, so the table seems to drift. The sun lights everything from one side; the lamp over the table still lights the game. Planet textures are generated at load time from noise.
@@ -40,7 +40,7 @@ The game is played in first person at a round table by default (three.js through
 - When you hold a card drawn from the deck, the red **Discard** button in its brass bezel rises out of the table next to your cards.
 - Card faces, backs, felt and wood are drawn on canvases at runtime; there are no image files.
 - Every step from the engine is played as animate → commit → wait for the cards to land, for both views (`Animator` in `anim.ts`).
-- Graphics come in two levels. **High** (desktops) adds ground-truth ambient occlusion, 4× multisampling, the lamp's cone in the room's haze and softer shadows; **normal** (phones) skips those. Both get a soft bounce of green light from the felt. If frames stay slow, high steps down to normal by itself. `?gfx=high` or `?gfx=low` sets the level and keeps it.
+- Graphics come in two levels. **High** (desktops) adds ground-truth ambient occlusion, 4× multisampling, the lamp's cone in the room's haze and softer shadows; **normal** (phones) skips those. Both get a soft bounce of green light from the felt. If frames stay slow, the pixel ratio steps down (and back up when there is headroom), and high steps down to normal by itself. `?gfx=high` or `?gfx=low` sets the level and keeps it.
 - Phones: the pixel ratio is capped at 1.5, there is one shadow-casting lamp with a 1024 px shadow map, and frames are only rendered while something moves.
 
 ### Characters
@@ -61,7 +61,7 @@ To use other models, list `.glb` files in `components/three/characterModels.ts`.
 ```
 index.html  index.tsx  index.css  App.tsx  metadata.json
 i18n.ts           German and English strings
-audio.ts          card sounds: recorded samples with variation and stereo position, synthesized fallback
+audio.ts          card sounds: recorded samples with variation and stereo position, softened (gentle low-pass, light compression, short fade-in), synthesized fallback
 anim.ts           Animator interface; 2D card flights, flips, layout shifts
 useGame.ts        plays incoming steps: animate, then commit
 game/types.ts     data model

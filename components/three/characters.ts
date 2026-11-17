@@ -155,6 +155,8 @@ const vTmp = new THREE.Vector3();
 export class Characters {
   root = new THREE.Group();
   private figures = new Map<string, Figure>();
+  /** where real players are actually looking (from their 3D view), by player id */
+  private gazes = new Map<string, [number, number]>();
   invalidate: () => void = () => {};
 
   /** One figure per opponent; you are the camera */
@@ -327,8 +329,29 @@ export class Characters {
       fig.goalYaw = Math.max(-1.1, Math.min(1.1, rel));
       fig.goalPitch = Math.max(-0.2, Math.min(0.7, Math.atan2(-d.y, Math.hypot(d.x, d.z))));
       fig.goalLean = lean;
+      this.applyGaze(p.id);
     });
     this.invalidate();
+  }
+
+  /** A real player's head follows where they look in their own 3D view; `null` hands it back to the game */
+  setGaze(playerId: string, look: [number, number] | null) {
+    if (!look) {
+      if (this.gazes.delete(playerId)) this.invalidate();
+      return;
+    }
+    this.gazes.set(playerId, look);
+    this.applyGaze(playerId);
+    this.invalidate();
+  }
+
+  private applyGaze(playerId: string) {
+    const g = this.gazes.get(playerId);
+    const fig = this.figures.get(playerId);
+    if (!g || !fig) return;
+    // a head turns so far; beyond that the shoulders would have to follow
+    fig.goalYaw = Math.max(-1.1, Math.min(1.1, g[0]));
+    fig.goalPitch = Math.max(-0.35, Math.min(0.8, g[1]));
   }
 
   /** Play a short gesture for whatever just happened */

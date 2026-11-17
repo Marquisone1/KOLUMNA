@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { spawnExtra, type Extra } from '../characters';
 import * as THREE from 'three';
-import { leatherTexture, plankTexture, signTexture, wallpaperTexture, woodTexture } from '../textures';
+import { leatherTexture, loadCardFonts, plankTexture, signTexture, wallpaperTexture, woodTexture } from '../textures';
 import type { RoomProps } from './types';
 import { useBackdrop } from './backdrop';
 
@@ -578,24 +578,44 @@ function Plants() {
 function Posters() {
   const mats = useMemo(() => [12, -2, 0, 7].map((v, i) => {
     const c = document.createElement('canvas');
-    c.width = 256;
-    c.height = 360;
+    c.width = 512;
+    c.height = 720;
     const ctx = c.getContext('2d')!;
     const ink = v < 0 ? TIER[0] : v === 0 ? TIER[1] : v <= 4 ? TIER[2] : v <= 8 ? TIER[3] : TIER[4];
-    ctx.fillStyle = '#fbf3e4';
-    ctx.fillRect(0, 0, 256, 360);
-    ctx.fillStyle = ink;
-    ctx.fillRect(18, 18, 220, 250);
-    ctx.fillStyle = v === 0 || (v > 4 && v <= 8) ? '#1b2430' : '#ffffff';
-    ctx.font = "600 150px 'Fraunces', Georgia, serif";
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(v < 0 ? '\u2212' + Math.abs(v) : String(v), 128, 150);
-    ctx.fillStyle = '#1b2430';
-    ctx.font = "600 26px 'Instrument Sans', system-ui, sans-serif";
-    ctx.fillText(['Spielabend', 'Jeden Freitag', 'Kolumna', 'Drei gleiche r\u00e4umen ab'][i], 128, 312);
+    const dark = v === 0 || (v > 4 && v <= 8);
+    const draw = () => {
+      ctx.setTransform(2, 0, 0, 2, 0, 0);
+      ctx.fillStyle = '#fbf3e4';
+      ctx.fillRect(0, 0, 256, 360);
+      ctx.fillStyle = ink;
+      ctx.fillRect(18, 18, 220, 250);
+      ctx.fillStyle = dark ? '#1b2430' : '#ffffff';
+      ctx.font = "600 150px 'Fraunces', Georgia, serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const num = String(Math.abs(v));
+      const w = ctx.measureText(num).width;
+      if (v < 0) {
+        // the minus as a drawn bar, set tight to the digits (fonts disagree wildly about its width)
+        const bw = 44;
+        const x0 = 128 - (w + bw + 10) / 2;
+        ctx.fillRect(x0, 146, bw, 13);
+        ctx.fillText(num, x0 + bw + 10 + w / 2, 150);
+      } else {
+        ctx.fillText(num, 128, 150, 200);
+      }
+      ctx.fillStyle = '#1b2430';
+      ctx.font = "600 26px 'Instrument Sans', system-ui, sans-serif";
+      // long lines shrink to fit the paper instead of running off it
+      ctx.fillText(['Spielabend', 'Jeden Freitag', 'Kolumna', 'Drei gleiche räumen ab'][i], 128, 312, 216);
+      t.needsUpdate = true;
+    };
     const t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 8;
+    draw();
+    // drawn again once the web fonts are in
+    loadCardFonts().then(draw).catch(() => {});
     return new THREE.MeshStandardMaterial({ map: t, roughness: 0.75 });
   }), []);
   useEffect(() => () => mats.forEach((m) => { m.map?.dispose(); m.dispose(); }), [mats]);
@@ -735,7 +755,7 @@ function Jukebox({ mobile, mats }: { mobile: boolean; mats: Mats }) {
   }, []);
   useEffect(() => () => { front.map?.dispose(); front.dispose(); }, [front]);
   return (
-    <group position={[34, FLOOR, BACK_Z + 4]} rotation-y={-0.5}>
+    <group position={[37, FLOOR, -21]} rotation-y={-1.0}>
       <Box size={[6, 9, 3.6]} pos={[0, 4.5, 0]} mat={mats.wood} shadow />
       <mesh position={[0, 9, 0]} rotation-z={Math.PI / 2} material={mats.wood}>
         <cylinderGeometry args={[3, 3, 3.6, 32, 1, false, 0, Math.PI]} />

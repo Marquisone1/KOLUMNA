@@ -38,7 +38,18 @@ function context(): AudioContext | null {
       ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
       master = ctx.createGain();
       master.gain.value = gainFor(volume);
-      master.connect(ctx.destination);
+      // softer overall: the brightest edge of the card snaps is taken off and peaks are evened out
+      const soften = ctx.createBiquadFilter();
+      soften.type = 'lowpass';
+      soften.frequency.value = 4800;
+      soften.Q.value = 0.5;
+      const even = ctx.createDynamicsCompressor();
+      even.threshold.value = -20;
+      even.knee.value = 12;
+      even.ratio.value = 3;
+      even.attack.value = 0.004;
+      even.release.value = 0.2;
+      master.connect(soften).connect(even).connect(ctx.destination);
     }
     return ctx;
   } catch {
@@ -132,9 +143,13 @@ function sample(group: Group, o: SoundOpts = {}): boolean {
   last.set(group, i);
   const src = a.createBufferSource();
   src.buffer = buf;
-  src.playbackRate.value = (o.rate ?? 1) * (0.95 + Math.random() * 0.1);
+  src.playbackRate.value = (o.rate ?? 1) * (0.96 + Math.random() * 0.06);
   const g = a.createGain();
-  g.gain.value = (o.gain ?? 1) * (0.85 + Math.random() * 0.2);
+  // a few milliseconds of fade-in round off the hard click at the start of each take
+  const t0 = a.currentTime + (o.when ?? 0);
+  const level = (o.gain ?? 1) * 0.8 * (0.88 + Math.random() * 0.14);
+  g.gain.setValueAtTime(0, t0);
+  g.gain.linearRampToValueAtTime(level, t0 + 0.008);
   let node: AudioNode = src.connect(g);
   if (o.pan && a.createStereoPanner) {
     const p = a.createStereoPanner();
@@ -142,7 +157,7 @@ function sample(group: Group, o: SoundOpts = {}): boolean {
     node = node.connect(p);
   }
   node.connect(master);
-  src.start(a.currentTime + (o.when ?? 0));
+  src.start(t0);
   return true;
 }
 

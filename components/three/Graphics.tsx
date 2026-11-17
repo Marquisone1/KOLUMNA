@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 
 // Lighting beyond what the lights alone give: ambient occlusion, a bounce from the felt,
@@ -28,11 +29,12 @@ export function initialQuality(width: number): Quality {
 
 /**
  * Renders through a composer: the scene, ground-truth ambient occlusion (contact shadows in
- * corners, under cards and furniture, where figures meet the table), then tone mapping; drawn multisampled.
+ * corners, under cards and furniture, where figures meet the table), SMAA, then tone mapping; drawn multisampled.
  * Taking over the render loop is what a useFrame with priority 1 does in react-three-fiber.
  */
 export function PostEffects() {
   const { gl, scene, camera, size } = useThree();
+  const dpr = useThree((st) => st.viewport.dpr);
   const composer = useMemo(() => {
     // the scene is drawn into a 4× multisampled buffer: real geometric antialiasing for the thin card
     // edges, sharper than a post-process filter (the size is set below)
@@ -45,13 +47,15 @@ export function PostEffects() {
     ao.updateGtaoMaterial({ radius: 0.9, distanceExponent: 1.6, thickness: 1.2, scale: 1.0, samples: 12 });
     ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
     c.addPass(ao);
+    // multisampling smooths geometry; SMAA after the occlusion also cleans the edges that pass adds
+    c.addPass(new SMAAPass());
     c.addPass(new OutputPass());
     return c;
   }, [gl, scene, camera]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     composer.setPixelRatio(gl.getPixelRatio());
     composer.setSize(size.width, size.height);
-  }, [composer, gl, size.width, size.height]);
+  }, [composer, gl, size.width, size.height, dpr]);
   useEffect(() => () => composer.dispose(), [composer]);
   useFrame((_, dt) => composer.render(dt), 1);
   return null;
@@ -108,6 +112,37 @@ export function QualityWatch({ onSlow }: { onSlow: () => void }) {
         a.done = true;
         onSlow();
       }
+    }
+  });
+  return null;
+}
+
+/**
+ * Keeps the frame rate up by drawing at a lower pixel ratio when frames are slow, in quarter steps
+ * down to 1, and back up a step when there is plenty of headroom. Rooms render continuously, so
+ * the frame rate is a fair measure.
+ */
+export function AdaptiveResolution({ max, setDpr }: { max: number; setDpr: (dpr: number) => void }) {
+  // the pixel ratio lives in the parent's state: the canvas would reset one set here on its next render
+  const acc = useRef({ t: 0, n: 0, dpr: max, slow: 0, fast: 0 });
+  useFrame((_, dt) => {
+    const a = acc.current;
+    a.t += dt;
+    a.n++;
+    if (a.t < 1.5) return;
+    const fps = a.n / a.t;
+    a.t = 0;
+    a.n = 0;
+    a.slow = fps < 42 ? a.slow + 1 : 0;
+    a.fast = fps > 58 ? a.fast + 1 : 0;
+    if (a.slow >= 2 && a.dpr > 1) {
+      a.dpr = Math.max(1, a.dpr - 0.25);
+      a.slow = 0;
+      setDpr(a.dpr);
+    } else if (a.fast >= 8 && a.dpr < max) {
+      a.dpr = Math.min(max, a.dpr + 0.25);
+      a.fast = 0;
+      setDpr(a.dpr);
     }
   });
   return null;
