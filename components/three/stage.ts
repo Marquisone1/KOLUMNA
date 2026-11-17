@@ -257,6 +257,12 @@ export class TableStage {
   private previewPanelMat: THREE.MeshBasicMaterial;
   private previewLabel: THREE.Mesh;
   private previewOf: string | null = null;
+  private pileHolo = new THREE.Group();
+  private pileHoloCard!: THREE.Mesh;
+  private pileHoloMat!: THREE.MeshBasicMaterial;
+  private pileHoloV: number | null = null;
+  private pileHoloOpacity = 0;
+  private pileHoloPop = 0;
   private previewKey = '';
   private previewOpacity = 0;
   private previewHideAt = 0;
@@ -308,7 +314,14 @@ export class TableStage {
     for (const m of [this.previewPanel, this.previewLabel]) { m.raycast = noRaycast; m.renderOrder = 3; }
     this.preview.add(this.previewPanel, this.previewCards, this.previewLabel);
     this.preview.visible = false;
-    this.root.add(this.matGroup, this.turntable, this.toss, this.preview);
+    // the top of the discard pile again, readable and see-through, between you and the turntable
+    this.pileHoloMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, toneMapped: false });
+    this.pileHoloCard = new THREE.Mesh(geo.card!, this.pileHoloMat);
+    this.pileHoloCard.raycast = noRaycast;
+    this.pileHoloCard.renderOrder = 4;
+    this.pileHolo.add(this.pileHoloCard);
+    this.pileHolo.visible = false;
+    this.root.add(this.matGroup, this.turntable, this.toss, this.preview, this.pileHolo);
   }
 
   // ---------- hologram preview ----------
@@ -500,6 +513,13 @@ export class TableStage {
     this.discardMark.position.set(layout.discard.x, TT_H + 0.0008, layout.discard.z);
     this.discardRing.position.set(layout.discard.x, TT_H + 0.0015, layout.discard.z);
     this.toss.position.set(layout.toss.x, 0, layout.toss.z);
+    // halfway between the turntable and your cards, low enough to stay under your line of sight to the piles
+    const mine = layout.seats.find((st) => st && st.angle === 0) ?? layout.seats[0];
+    const near = mine.z - GRID_D / 2;
+    this.pileHolo.position.set(0, 0.55, near - (near - 1.95) * 0.45);
+    const toEye = layout.eye.clone().sub(this.pileHolo.position);
+    this.pileHolo.rotation.set(Math.atan2(toEye.z, toEye.y) * 0.85, 0, 0);
+    this.pileHolo.scale.setScalar(layout.portrait ? 1.05 : 1.2);
     // a mat for every seat: a printed rule in the seat colour around the grid
     this.matGroup.clear();
     this.mats.clear();
@@ -648,6 +668,15 @@ export class TableStage {
     if (opts.instant) this.deckHeight = this.deckGoal;
     const top = view.discard[view.discard.length - 1];
     this.topDiscard = top ? top.id : null;
+    const v = top ? top.v : null;
+    if (v !== this.pileHoloV) {
+      this.pileHoloV = v;
+      if (v !== null) {
+        this.pileHoloMat.map = frontTexture(v);
+        this.pileHoloMat.needsUpdate = true;
+        this.pileHoloPop = performance.now();
+      }
+    }
     if (this.previewOf) this.rebuildPreview();
     this.refreshInteractive();
     this.invalidate();
@@ -915,6 +944,20 @@ export class TableStage {
       active = true;
     }
     if (this.previewHideAt) active = true;
+    // the pile's hologram: shown while the game is on, a small lift when the top card changes
+    const hGoal = this.pileHoloV !== null && (this.view?.phase === 'play' || this.view?.phase === 'setup') ? 1 : 0;
+    if (Math.abs(this.pileHoloOpacity - hGoal) > 1e-3) {
+      this.pileHoloOpacity += (hGoal - this.pileHoloOpacity) * (1 - Math.exp(-dt * 10));
+      if (Math.abs(this.pileHoloOpacity - hGoal) <= 1e-3) this.pileHoloOpacity = hGoal;
+      this.pileHoloMat.opacity = this.pileHoloOpacity * 0.82;
+      this.pileHolo.visible = this.pileHoloOpacity > 0.01;
+      active = true;
+    }
+    const popT = (now - this.pileHoloPop) / 260;
+    if (popT >= 0 && popT < 1) {
+      this.pileHoloCard.position.y = Math.sin(popT * Math.PI) * 0.06;
+      active = true;
+    } else this.pileHoloCard.position.y = 0;
     this.mats.forEach((m) => {
       if (Math.abs(m.mat.opacity - m.goal) > 1e-3) {
         m.mat.opacity += (m.goal - m.mat.opacity) * k;
