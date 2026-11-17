@@ -263,6 +263,21 @@ export class TableStage {
   private pileHoloV: number | null = null;
   private pileHoloOpacity = 0;
   private pileHoloPop = 0;
+  /** the pile's hologram shows only while the pointer is over the discard pile (or after a tap on it) */
+  private pileHoloOn = false;
+  private pileHoloHideAt = 0;
+
+  setPileHolo(on: boolean) {
+    if (on) { this.pileHoloOn = true; this.pileHoloHideAt = 0; }
+    else if (this.pileHoloOn && !this.pileHoloHideAt) this.pileHoloHideAt = performance.now() + 200;
+    this.invalidate();
+  }
+
+  togglePileHolo() {
+    this.pileHoloHideAt = 0;
+    this.pileHoloOn = !this.pileHoloOn;
+    this.invalidate();
+  }
   private previewKey = '';
   private previewOpacity = 0;
   private previewHideAt = 0;
@@ -945,7 +960,9 @@ export class TableStage {
     }
     if (this.previewHideAt) active = true;
     // the pile's hologram: shown while the game is on, a small lift when the top card changes
-    const hGoal = this.pileHoloV !== null && (this.view?.phase === 'play' || this.view?.phase === 'setup') ? 1 : 0;
+    if (this.pileHoloHideAt && now >= this.pileHoloHideAt) { this.pileHoloHideAt = 0; this.pileHoloOn = false; }
+    if (this.pileHoloHideAt) active = true;
+    const hGoal = this.pileHoloOn && this.pileHoloV !== null && (this.view?.phase === 'play' || this.view?.phase === 'setup') ? 1 : 0;
     if (Math.abs(this.pileHoloOpacity - hGoal) > 1e-3) {
       this.pileHoloOpacity += (hGoal - this.pileHoloOpacity) * (1 - Math.exp(-dt * 10));
       if (Math.abs(this.pileHoloOpacity - hGoal) <= 1e-3) this.pileHoloOpacity = hGoal;

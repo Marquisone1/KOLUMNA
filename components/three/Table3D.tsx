@@ -349,6 +349,8 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
     // hovering someone else's grid shows it beside yours, readable
     const hoveredId = (e.object.userData as { cardId?: number }).cardId;
     stage.setPreview(hoveredId !== undefined ? stage.ownerOf(hoveredId) : null);
+    // over the discard pile: its top card shows again in front of you, readable
+    stage.setPileHolo(hit !== null && 'pile' in hit && hit.pile === 'discard');
     if (stage.hovered !== card || stage.pileHover !== pile) {
       stage.hovered = card;
       stage.pileHover = pile;
@@ -362,6 +364,7 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
     clearHover();
     reportHover(null);
     stage.setPreview(null);
+    stage.setPileHolo(false);
   };
   const onClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
@@ -383,6 +386,8 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
     }
     if (hit.pile === 'deck' && m.deckActive) m.onDeck();
     if (hit.pile === 'discard' && m.discardActive) m.onDiscard();
+    // touch has no hover: a tap on the pile when it cannot be taken shows or hides its hologram
+    else if (hit.pile === 'discard' && (e.nativeEvent as PointerEvent).pointerType === 'touch') stage.togglePileHolo();
     if (hit.pile === 'toss') toss();
     clearHover();
   };
