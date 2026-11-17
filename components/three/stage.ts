@@ -78,7 +78,7 @@ function faceMaterial(v: number | null): THREE.MeshStandardMaterial {
   let m = materials.get(key) as THREE.MeshStandardMaterial | undefined;
   if (!m) {
     // satin card stock: a soft sheen from the room, no plastic shine
-    m = new THREE.MeshStandardMaterial({ map: v === null ? backTexture() : frontTexture(v), roughness: 0.48, metalness: 0, envMapIntensity: 0.6 });
+    m = new THREE.MeshStandardMaterial({ map: v === null ? backTexture() : frontTexture(v), roughness: 0.88, metalness: 0, envMapIntensity: 0.22 });
     m.shadowSide = THREE.DoubleSide;
     materials.set(key, m);
   }
@@ -276,7 +276,7 @@ export class TableStage {
 
     // the deck: a block of card stock with a card back on top
     const edge = new THREE.MeshStandardMaterial({ color: '#e6dccb', roughness: 0.85 });
-    const top = new THREE.MeshStandardMaterial({ map: backTexture(), roughness: 0.48 });
+    const top = new THREE.MeshStandardMaterial({ map: backTexture(), roughness: 0.88, envMapIntensity: 0.22 });
     const box = new THREE.BoxGeometry(CARD_W * 0.99, 1, CARD_H * 0.99);
     box.translate(0, 0.5, 0);
     this.deckMesh = new THREE.Mesh(box, [edge, edge, top, edge, edge, edge]);
@@ -883,7 +883,7 @@ export class TableStage {
       while (left > 0) {
         const h = Math.min(left, 1 / 120);
         const dd = goal - press * 0.1 - this.tossY;
-        this.tossV += (dd * 180 - this.tossV * 15) * h;
+        this.tossV += (dd * 420 - this.tossV * 34) * h;
         this.tossY += this.tossV * h;
         left -= h;
       }

@@ -55,6 +55,18 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
   const chars = useMemo(() => new Characters(), []);
   const wrap = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
+  // the discard button works as soon as the drawn card is yours, even while it is still flying to
+  // your hand; one press per draw
+  const [tossSent, setTossSent] = useState(false);
+  useEffect(() => setTossSent(false), [view.stage, view.turn, view.round]);
+  const canToss = m.canToss && !tossSent;
+  const toss = () => {
+    if (!canToss) return;
+    setTossSent(true);
+    stage.pressToss();
+    sfx.press();
+    send({ a: 'toss' });
+  };
   const overlay = useRef<Overlay>({ plates: new Map(), deck: null });
   const look = useRef<Look>({ yaw: 0, pitch: 0, dragging: false, follow: false });
   const invalidateRef = useRef<() => void>(() => {});
@@ -143,7 +155,7 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
     stage.selectable = sel;
     stage.deckActive = m.deckActive;
     stage.discardActive = m.discardActive;
-    stage.tossActive = m.canToss && m.canAct;
+    stage.tossActive = canToss;
     const peers = new Map<number, string>();
     if (hovers) {
       for (const [pid, h] of Object.entries(hovers)) {
@@ -293,11 +305,7 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
     }
     if (hit.pile === 'deck' && m.deckActive) m.onDeck();
     if (hit.pile === 'discard' && m.discardActive) m.onDiscard();
-    if (hit.pile === 'toss' && m.canToss && m.canAct) {
-      stage.pressToss();
-      sfx.press();
-      send({ a: 'toss' });
-    }
+    if (hit.pile === 'toss') toss();
     clearHover();
   };
 
@@ -356,7 +364,7 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
         {m.finalNote && <p className="status-final">{m.finalNote}</p>}
         {/* the real button rises out of the table; this one is for keyboards and screen readers */}
         {m.canToss && (
-          <button type="button" className="sr-only" onClick={() => { stage.pressToss(); sfx.press(); send({ a: 'toss' }); }} disabled={!m.canAct}>
+          <button type="button" className="sr-only" onClick={toss} disabled={!canToss}>
             {t('discardIt')}
           </button>
         )}

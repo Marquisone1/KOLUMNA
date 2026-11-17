@@ -76,10 +76,9 @@ export function edgeOf(seat: Seat) {
  * Opponents' cards are drawn larger than yours: from across a big table at the same size
  * they would be hard to read, and reading them is the game. The piles in the middle too.
  */
-export const OPPONENT_SCALE = 1.75;
-export const OPPONENT_SCALE_PORTRAIT = 1.35;
+export const OPPONENT_SCALE = 1.35;
 /** Deck and discard pile on the turntable */
-export const PILE_SCALE = 1.7;
+export const PILE_SCALE = 1.85;
 
 /** Where a grid card sits: column c of `cols`, row r (0 = far row, toward the centre) */
 export function slotPose(seat: Seat, cols: number, c: number, r: number, up: boolean): Pose {
@@ -118,15 +117,13 @@ export function computeLayout(n: number, meIdx: number, aspect: number, hudTop: 
 
   // Grids sit on a circle. Grow it until neither grids nor the people behind them crowd each other.
   let R = m <= 1 ? 5.2 : 6.2;
-  // on a narrow portrait screen the larger grids would not fit across, so they stay a little smaller there
-  const opp = portrait ? OPPONENT_SCALE_PORTRAIT : OPPONENT_SCALE;
-  const seatAt = (a: number, r: number): Seat => ({ x: -Math.sin(a) * r, z: Math.cos(a) * r, yaw: -a, s: a === 0 ? 1 : opp, angle: a });
+  const seatAt = (a: number, r: number): Seat => ({ x: -Math.sin(a) * r, z: Math.cos(a) * r, yaw: -a, s: a === 0 ? 1 : OPPONENT_SCALE, angle: a });
   for (; R < 14; R += 0.1) {
     const all = [0, ...angles].map((a) => seatAt(a, R));
     let ok = true;
     for (let i = 0; i < all.length && ok; i++) {
       for (let j = i + 1; j < all.length && ok; j++) {
-        if (Math.hypot(all[i].x - all[j].x, all[i].z - all[j].z) < 1.85 * (all[i].s + all[j].s)) ok = false;
+        if (Math.hypot(all[i].x - all[j].x, all[i].z - all[j].z) < 2.15 * (all[i].s + all[j].s)) ok = false;
         if (sitterPoint(all[i]).distanceTo(sitterPoint(all[j])) < 7.2) ok = false;
       }
       if (Math.hypot(all[i].x, all[i].z) < 2.0 + 1.55 * all[i].s + 0.8) ok = false;
@@ -139,8 +136,8 @@ export function computeLayout(n: number, meIdx: number, aspect: number, hudTop: 
   angles.forEach((a, i) => { seats[(me + 1 + i) % n] = seatAt(a, R); });
 
   // deck and discard sit side by side on the turntable in the middle (its own frame)
-  const deck = { x: -0.72, z: 0 };
-  const discard = { x: 0.72, z: 0 };
+  const deck = { x: -0.8, z: 0 };
+  const discard = { x: 0.8, z: 0 };
   // the button that rises out of the table, to your right
   const toss = portrait ? { x: 0, z: R + GRID_D / 2 + 0.75 } : { x: GRID_W / 2 + 1.0, z: R + 0.2 };
 
