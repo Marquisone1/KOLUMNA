@@ -657,3 +657,21 @@ button.card { display: inline-block; }
   pointer-events: none;
 }
 @media (max-width: 900px) { .lock-hint3d { display: none; } }
+
+/* ---------- couch mode ---------- */
+.couch-entry { display: grid; gap: 6px; margin-top: 20px; justify-items: start; }
+.couch-hint { margin: 0; font-size: 13px; }
+.lobby-qr { display: flex; align-items: center; gap: 24px; padding-bottom: 8px; }
+.lobby-qr .qr { border-radius: 14px; flex: none; }
+.lobby-qr-title { margin: 10px 0 0; font-family: var(--serif); font-size: 26px; line-height: 1.2; color: var(--text); }
+.tag-accent .icon, .tag-accent svg { margin-right: 4px; }
+@media (max-width: 640px) { .lobby-qr { flex-direction: column; align-items: flex-start; } }
+.opp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 8px 12px 0; list-style: none; justify-content: center; }
+.opp-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
+  border-radius: 999px; background: var(--raised); border: 1px solid var(--hair); font-size: 13px;
+}
+.opp-chip-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--seat); }
+.opp-chip.is-turn { border-color: var(--seat); box-shadow: 0 0 0 1px var(--seat); }
+.opp-chip-name { font-weight: 600; }
+.game.is-tv .topbar-game { height: 48px; }

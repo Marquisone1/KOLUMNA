@@ -108,7 +108,8 @@ export class HostSession extends Base implements Session {
 
   private fixedCode: string | null = null;
 
-  constructor(name: string, resume?: SavedHost) {
+  /** `screen`: couch mode, this device only shows the table and takes no seat */
+  constructor(name: string, resume?: SavedHost, screen = false) {
     super();
     if (resume) {
       this.pid = resume.pid;
@@ -118,7 +119,7 @@ export class HostSession extends Base implements Session {
     } else {
       this.pid = uid('h-');
       this.game = new Game(this.pid);
-      this.game.addPlayer(this.pid, name);
+      if (!screen) this.game.addPlayer(this.pid, name);
     }
   }
 

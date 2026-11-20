@@ -28,6 +28,10 @@ The host sets these before the game starts; everyone else sees them:
 
 The speaker button in the top bar opens a volume slider with a mute switch; level and mute are remembered per device.
 
+## Couch mode
+
+For playing together in one room with a TV. On the TV (or a laptop connected to it), choose **TV as the card table** on the start screen. That device takes no seat: in the lobby it shows a large QR code, and once the game runs it shows only the 3D table, seen from above, with everyone's grid, the piles and the characters. Everyone else scans the QR code with their phone, enters a name and plays on the phone: the phone shows their own cards, the deck, the discard pile, the card they drew and who is playing. The TV never shows face-down values or a card drawn from the deck. Any seated player may start the game and move on between rounds; the settings stay with the TV.
+
 ## 3D table
 
 The game is played in first person at a round table by default (three.js through @react-three/fiber). You see the table from your chair: your own cards in front of you, the others sitting across and beside you, a lamp hanging over the table. Everyone sits evenly round the table (with six players, one every 60°), and every player sees it from their own chair; neighbours beside you are seen by turning your head. With a mouse, click the table to catch the pointer: moving the mouse then turns your head, a small crosshair in the middle picks what you click, and Esc lets go (`?lock=0` keeps the older mode, where moving the pointer toward the screen edges looks around). The other players' figures turn their heads to where their players are actually looking. On touch screens drag; the view turns back to the table on its own. While you are on the start screen or in the lobby, the 3D table, the room, the fonts and the characters already load in the background; a short loading screen covers the table until everything is in. The **2D / 3D** switch in the top bar changes the view at any time, also mid-game; the choice is remembered. Without WebGL, or if the 3D view fails to start, the 2D table is used. `?view=2d` forces 2D.

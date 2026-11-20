@@ -178,8 +178,10 @@ export default function Table3D({ view, me, isHost, busy, lastEv, hovers, send, 
   const maxDpr = useMemo(() => Math.min(typeof devicePixelRatio === 'number' ? devicePixelRatio : 1, 2), []);
   const [dpr, setDpr] = useState(maxDpr);
   // ?lock=0 keeps the pointer free (the older look-at-the-edges mode)
-  const finePointer = useMemo(() => typeof matchMedia !== 'undefined' && matchMedia('(pointer: fine)').matches
-    && new URLSearchParams(location.search).get('lock') !== '0', []);
+  // the TV in couch mode (no seat) has nobody to look around for
+  const spectator = m.meIdx < 0;
+  const finePointer = useMemo(() => !spectator && typeof matchMedia !== 'undefined' && matchMedia('(pointer: fine)').matches
+    && new URLSearchParams(location.search).get('lock') !== '0', [spectator]);
   // when the click that caught the pointer happened: that click itself does not play a card
   const lockClickAt = useRef(-1e9);
   const canvasEl = () => wrap.current?.querySelector('canvas') ?? null;

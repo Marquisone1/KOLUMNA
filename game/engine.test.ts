@@ -177,3 +177,21 @@ test('lobby settings: only the host changes them, only in the lobby; shuffled se
   }
   assert.ok(changed, 'seats were shuffled');
 });
+
+test('couch mode: a host without a seat runs the room, seated players may start and go on', () => {
+  const game = new Game('tv');
+  assert.equal(game.addPlayer('a', 'Ada').ok, true);
+  assert.equal(game.addPlayer('b', 'Bea').ok, true);
+  assert.equal(game.s.players.some((p) => p.id === 'tv'), false);
+  assert.equal(game.apply('tv', { a: 'settings', room: 'space' }).ok, true, 'the screen keeps the settings');
+  assert.equal(game.apply('a', { a: 'settings', room: 'bar' }).ok, false, 'settings stay with the screen');
+  assert.equal(game.apply('a', { a: 'start' }).ok, true, 'a seated player may start');
+  assert.equal(game.s.phase, 'setup');
+  // nobody can play for the screen
+  assert.equal(game.apply('tv', { a: 'flip', card: game.s.players[0].grid[0][0].card.id }).ok, false);
+  // with a seated host, only the host starts
+  const normal = new Game('h');
+  normal.addPlayer('h', 'Host');
+  normal.addPlayer('g', 'Guest');
+  assert.equal(normal.apply('g', { a: 'start' }).ok, false);
+});

@@ -62,7 +62,10 @@ export function useTableModel(view: GameState, me: string, busy: boolean, lastEv
   // Status line
   let status = '';
   let tone: 'mine' | 'wait' = 'wait';
-  if (view.phase === 'setup') {
+  if (view.phase === 'setup' && !mine) {
+    // the TV in couch mode
+    status = t('setupAll');
+  } else if (view.phase === 'setup') {
     const left = mine ? 2 - mine.setupFlips : 0;
     status = left === 2 ? t('setupMine') : left === 1 ? t('setupOne') : t('setupWait');
     tone = left > 0 ? 'mine' : 'wait';

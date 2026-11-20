@@ -165,6 +165,10 @@ export class Game {
     const fail = (err: string): Result => ({ ok: false, err, steps: this.flush() });
     const s = this.s;
     const isHost = pid === s.hostId;
+    // couch mode: the host is a screen without a seat, so the players on their phones may also start
+    // the game and move on between rounds
+    const couch = !s.players.some((p) => p.id === s.hostId);
+    const mayRun = isHost || (couch && s.players.some((p) => p.id === pid && !p.bot));
     const me = this.player(pid);
 
     switch (act.a) {
@@ -210,7 +214,7 @@ export class Game {
         return { ok: true, steps: this.flush() };
       }
       case 'start': {
-        if (!isHost || s.phase !== 'lobby') return fail('host');
+        if (!mayRun || s.phase !== 'lobby') return fail('host');
         if (s.players.length < 2) return fail('players');
         for (const p of s.players) { p.total = 0; p.history = []; }
         s.round = 0;
@@ -219,12 +223,12 @@ export class Game {
         return { ok: true, steps: this.flush() };
       }
       case 'nextRound': {
-        if (!isHost || s.phase !== 'roundEnd') return fail('host');
+        if (!mayRun || s.phase !== 'roundEnd') return fail('host');
         this.deal();
         return { ok: true, steps: this.flush() };
       }
       case 'toLobby': {
-        if (!isHost || (s.phase !== 'gameOver' && s.phase !== 'roundEnd')) return fail('host');
+        if (!mayRun || (s.phase !== 'gameOver' && s.phase !== 'roundEnd')) return fail('host');
         s.phase = 'lobby';
         s.players = s.players.filter((p) => p.connected || p.id.startsWith('bot-'));
         for (const p of s.players) {

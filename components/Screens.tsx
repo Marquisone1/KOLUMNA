@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 
 import type { Action, GameState, ViewPolicy } from '../game/types';
 import { DEFAULT_SETTINGS, ROOM_IDS } from '../game/types';
 import { MAX_PLAYERS, TARGET_OPTIONS } from '../game/types';
+import { QrCode } from './QrCode';
 import { normalizeCode } from '../net/transport';
 import { dict, useI18n, type Lang } from '../i18n';
 import { Card } from './Card';
@@ -113,10 +114,12 @@ interface HomeProps {
   pending: 'create' | 'join' | null;
   onCreate: (name: string) => void;
   onJoin: (name: string, code: string) => void;
+  /** couch mode: this device becomes the table on the TV */
+  onCouch: () => void;
   onRules: () => void;
 }
 
-export function Home({ initialName, initialCode, error, pending, onCreate, onJoin, onRules }: HomeProps) {
+export function Home({ initialName, initialCode, error, pending, onCreate, onJoin, onCouch, onRules }: HomeProps) {
   const { t } = useI18n();
   const [name, setName] = useState(initialName);
   const [code, setCode] = useState(initialCode);
@@ -187,6 +190,15 @@ export function Home({ initialName, initialCode, error, pending, onCreate, onJoi
             </button>
           </form>
           {error && <p className="error" role="alert">{error}</p>}
+
+          {!initialCode && (
+            <div className="couch-entry">
+              <button type="button" className="btn btn-secondary" onClick={onCouch} disabled={!!pending}>
+                <Icon name="tv" size={18} />{t('couchCreate')}
+              </button>
+              <p className="muted couch-hint">{t('couchHint')}</p>
+            </div>
+          )}
         </div>
 
         <div className="hero-visual" aria-hidden="true">
@@ -211,6 +223,9 @@ interface LobbyProps {
   send: (a: Action) => void;
 }
 
+/** couch mode: the host is a screen without a seat */
+export const isCouch = (view: GameState) => !view.players.some((p) => p.id === view.hostId);
+
 const BOT_NAMES = ['Ada', 'Bruno', 'Clara', 'Emil', 'Frieda', 'Gustav', 'Hanna', 'Ivo'];
 
 export function Lobby({ view, code, me, isHost, send }: LobbyProps) {
@@ -218,6 +233,10 @@ export function Lobby({ view, code, me, isHost, send }: LobbyProps) {
   const [copied, setCopied] = useState(false);
   const host = view.players.find((p) => p.id === view.hostId);
   const free = MAX_PLAYERS - view.players.length;
+  const couch = isCouch(view);
+  // in couch mode anyone seated may start; the screen may too
+  const mayStart = isHost || (couch && view.players.some((p) => p.id === me));
+  const tv = couch && isHost;
 
   const copy = async () => {
     if (await copyText(inviteLink(code))) {
@@ -234,6 +253,15 @@ export function Lobby({ view, code, me, isHost, send }: LobbyProps) {
   return (
     <main className="lobby">
       <section className="lobby-card">
+        {tv && (
+          <div className="lobby-qr">
+            <QrCode text={inviteLink(code)} size={260} label={t('scanToJoin')} />
+            <div>
+              <span className="tag tag-accent"><Icon name="tv" size={12} />{t('couchMode')}</span>
+              <p className="lobby-qr-title">{t('scanToJoin')}</p>
+            </div>
+          </div>
+        )}
         <div className="lobby-code">
           <span className="field-label">{t('roomCode')}</span>
           <span className="code tabular" aria-label={code.split('').join(' ')}>{code}</span>
@@ -292,12 +320,12 @@ export function Lobby({ view, code, me, isHost, send }: LobbyProps) {
               <span className="tabular">{view.target} {t('points')}</span>
             )}
           </div>
-          {isHost ? (
+          {mayStart ? (
             <button type="button" className="btn btn-primary btn-lg" disabled={view.players.length < 2} onClick={() => send({ a: 'start' })}>
               {view.players.length < 2 ? t('needTwo') : t('start')}
             </button>
           ) : (
-            <p className="secondary waiting"><span className="spinner" />{t('waitingFor', { name: host?.name ?? t('host') })}</p>
+            <p className="secondary waiting"><span className="spinner" />{couch ? t('waitingStart') : t('waitingFor', { name: host?.name ?? t('host') })}</p>
           )}
         </div>
       </section>

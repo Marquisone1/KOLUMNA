@@ -108,6 +108,7 @@ function spread(m: number) {
 }
 
 export function computeLayout(n: number, meIdx: number, aspect: number, hudTop: number, hudBottom: number): Layout {
+  if (meIdx < 0) return spectatorLayout(n, aspect, hudTop, hudBottom);
   const portrait = aspect < 0.9;
   const m = Math.max(0, n - 1);
   const angles = spread(m);
@@ -226,4 +227,58 @@ function fitEyes(eye: THREE.Vector3, sets: THREE.Vector3[][], aspect: number, to
   // Nothing fits (very narrow screens): look at your own cards with the widest view
   aim((42 * Math.PI) / 180);
   return { pos: eye.clone(), target: target.clone(), fov: maxFov };
+}
+
+/**
+ * Couch mode: the TV sits at no seat. Everyone sits evenly round the table, a half step turned so
+ * nobody has their back to the screen, and the camera looks down on the whole table from above
+ * the front edge, like a TV broadcast of a card game. Everyone's grid is drawn at the same size.
+ */
+function spectatorLayout(n: number, aspect: number, hudTop: number, hudBottom: number): Layout {
+  const portrait = aspect < 0.9;
+  const s = OPPONENT_SCALE;
+  const angles = Array.from({ length: n }, (_, i) => Math.PI / Math.max(1, n) + (i / Math.max(1, n)) * Math.PI * 2);
+  const seatAt = (a: number, r: number): Seat => ({ x: -Math.sin(a) * r, z: Math.cos(a) * r, yaw: -a, s, angle: a });
+  let R = 5.6;
+  for (; R < 14; R += 0.1) {
+    const all = angles.map((a) => seatAt(a, R));
+    let ok = true;
+    for (let i = 0; i < all.length && ok; i++) {
+      for (let j = i + 1; j < all.length && ok; j++) {
+        if (Math.hypot(all[i].x - all[j].x, all[i].z - all[j].z) < 2.15 * 2 * s) ok = false;
+        if (sitterPoint(all[i]).distanceTo(sitterPoint(all[j])) < 7.2) ok = false;
+      }
+      if (Math.hypot(all[i].x, all[i].z) < 2.0 + 1.55 * s + 0.8) ok = false;
+    }
+    if (ok) break;
+  }
+  const seats = angles.map((a) => seatAt(a, R));
+  const table = { r: R + Math.max(...seats.map(edgeOf)) };
+  const deck = { x: -0.8, z: 0 };
+  const discard = { x: 0.8, z: 0 };
+  // nobody presses the discard button on the TV: it stays sunk under the felt in the middle
+  const toss = { x: 0, z: 0 };
+  const handMine: Pose = { x: 0, y: -2, z: 0, yaw: 0, tilt: 0, flip: 0, s: 1 };
+  // high above the front of the table, steep enough that the nearest players' heads do not hide their cards
+  // (under the bar's ceiling beams at 21, and clear of the lamp shade over the middle of the table)
+  const eye = new THREE.Vector3(0, 18, table.r * (portrait ? 0.95 : 0.8) + 3);
+  const pts: THREE.Vector3[] = [];
+  const heads: THREE.Vector3[] = [];
+  seats.forEach((seat) => {
+    const hw = GRID_W / 2 + 0.05;
+    const hd = GRID_D / 2 + 0.05;
+    for (const [lx, lz] of [[-hw, -hd], [hw, -hd], [-hw, hd], [hw, hd]]) {
+      const p = seatPoint(seat, lx, lz);
+      pts.push(new THREE.Vector3(p.x, 0, p.z));
+    }
+    heads.push(sitterPoint(seat).setY(EYE_Y + 1.5));
+  });
+  pts.push(new THREE.Vector3(-2.2, 0, 0), new THREE.Vector3(2.2, 0, 0));
+  // the whole round table, not only the grids on it
+  const rim: THREE.Vector3[] = Array.from({ length: 12 }, (_, i) => {
+    const a = (i / 12) * Math.PI * 2;
+    return new THREE.Vector3(Math.sin(a) * table.r, 0, Math.cos(a) * table.r);
+  });
+  const camera = fitEyes(eye, [[...rim, ...pts, ...heads], [...rim, ...pts], pts], aspect, hudTop, hudBottom, portrait ? 80 : 62);
+  return { seats, deck, discard, toss, handMine, table, eye, camera, portrait };
 }

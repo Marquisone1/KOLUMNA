@@ -3,7 +3,7 @@ import { I18n, initialLang, makeT, type Lang } from './i18n';
 import { ClientSession, HostSession, rememberedId, savedHost, type Session } from './net/session';
 import { normalizeCode } from './net/transport';
 import { useGame } from './useGame';
-import { Home, Lobby, LangSwitch, RulesDialog, Wordmark, copyText, inviteLink } from './components/Screens';
+import { Home, Lobby, LangSwitch, RulesDialog, Wordmark, copyText, inviteLink, isCouch } from './components/Screens';
 import { Table } from './components/Table';
 import { Scoreboard } from './components/Scoreboard';
 import { Icon } from './components/Icon';
@@ -45,7 +45,11 @@ export default function App() {
   const [mode, setModeState] = useState<ViewMode>(initialViewMode);
   // the host may fix the view for everyone in the lobby settings; without WebGL it is 2D regardless
   const policy = view?.settings?.view ?? 'both';
-  const shown: ViewMode = !webgl || policy === '2d' ? '2d' : policy === '3d' ? '3d' : mode;
+  // couch mode: the host's device is the TV with the table, everyone else holds their cards on a phone
+  const couch = !!view && isCouch(view);
+  const tv = couch && !!session?.isHost;
+  const pad = couch && !session?.isHost;
+  const shown: ViewMode = pad || !webgl || policy === '2d' ? '2d' : policy === '3d' || tv ? '3d' : mode;
   const [notice, setNotice] = useState<string | null>(null);
   const setMode = useCallback((m: ViewMode) => { setModeState(m); saveViewMode(m); }, []);
   // load the 3D table in the background while people are still on the start screen or in the lobby
@@ -69,6 +73,21 @@ export default function App() {
     setError(null);
     setPending('create');
     const s = new HostSession(name);
+    try {
+      await s.open();
+      setSession(s);
+      setRoomInUrl(s.code);
+    } catch {
+      setError(t(s.reason === 'timeout' ? 'reason.timeout' : 'reason.network'));
+    } finally {
+      setPending(null);
+    }
+  }, [t]);
+
+  const createCouch = useCallback(async () => {
+    setError(null);
+    setPending('create');
+    const s = new HostSession('', undefined, true);
     try {
       await s.open();
       setSession(s);
@@ -147,6 +166,7 @@ export default function App() {
         pending={pending}
         onCreate={create}
         onJoin={join}
+        onCouch={createCouch}
         onRules={() => setRules(true)}
       />
     );
@@ -160,7 +180,7 @@ export default function App() {
     );
   } else {
     body = (
-      <div className={'game' + (shown === '3d' && view.phase !== 'lobby' ? ' is-3d' : '')}>
+      <div className={'game' + (shown === '3d' && view.phase !== 'lobby' ? ' is-3d' : '') + (tv ? ' is-tv' : '') + (pad ? ' is-pad' : '')}>
         <header className="topbar topbar-game">
           <Wordmark />
           <button type="button" className="code-chip" onClick={copyInvite} title={t('copyLink')}>
@@ -170,7 +190,7 @@ export default function App() {
           {view.phase !== 'lobby' && <span className="muted round-label">{t('roundN', { n: view.round })}</span>}
           <span className="spacer" />
           <button type="button" className="icon-btn" onClick={() => setRules(true)} aria-label={t('rules')} title={t('rules')}><Icon name="book" /></button>
-          {webgl && policy === 'both' && (
+          {webgl && policy === 'both' && !couch && (
             <div className="seg" role="group" aria-label={t('view')}>
               {(['2d', '3d'] as ViewMode[]).map((m) => (
                 <button key={m} type="button" className={mode === m ? 'is-on' : ''} aria-pressed={mode === m} onClick={() => setMode(m)}>
@@ -196,10 +216,10 @@ export default function App() {
                 </Suspense>
               </ViewBoundary>
             ) : (
-              <Table view={view} me={session.pid} isHost={session.isHost} busy={busy} lastEv={lastEv} hovers={hovers} send={send} onHover={sendHover} />
+              <Table view={view} me={session.pid} isHost={session.isHost} busy={busy} lastEv={lastEv} hovers={hovers} send={send} onHover={sendHover} controller={pad} />
             )}
             {(view.phase === 'roundEnd' || view.phase === 'gameOver') && !busy && (
-              <Scoreboard key={view.round} view={view} me={session.pid} isHost={session.isHost} send={send} onLeave={leave} />
+              <Scoreboard key={view.round} view={view} me={session.pid} isHost={session.isHost || pad} send={send} onLeave={leave} />
             )}
           </>
         )}
